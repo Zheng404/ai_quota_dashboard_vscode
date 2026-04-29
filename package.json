@@ -1,0 +1,122 @@
+{
+  "name": "ai-usage-monitor",
+  "displayName": "AI Usage Monitor",
+  "description": "Monitor AI Coding Plan quota usage (GLM, Kimi, etc.)",
+  "version": "0.1.0",
+  "publisher": "Zheng404",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zheng404/ai_usage_monitor_vscode"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "resources/icon.png",
+  "keywords": [
+    "ai",
+    "quota",
+    "usage",
+    "glm",
+    "kimi",
+    "monitor",
+    "coding-plan"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiUsageMonitor.refresh",
+        "title": "AI Usage Monitor: 刷新配额",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "aiUsageMonitor.openDashboard",
+        "title": "AI Usage Monitor: 打开配额面板",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "aiUsageMonitor.resetData",
+        "title": "AI Usage Monitor: 重置数据"
+      },
+      {
+        "command": "aiUsageMonitor.openSettings",
+        "title": "AI Usage Monitor: 打开设置",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "aiUsageMonitor.clearHistory",
+        "title": "AI Usage Monitor: 清除历史"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiUsageMonitor",
+          "title": "AI 配额",
+          "icon": "$(pulse)"
+        }
+      ]
+    },
+    "views": {
+      "aiUsageMonitor": [
+        {
+          "id": "aiUsageMonitor.dashboardView",
+          "name": "配额仪表盘",
+          "type": "webview",
+          "when": "true"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AI Usage Monitor",
+      "properties": {
+        "aiUsageMonitor.refreshInterval": {
+          "type": "number",
+          "default": 600,
+          "minimum": 0,
+          "description": "自动刷新间隔（秒）。设为 0 禁用自动刷新。",
+          "order": 1
+        },
+        "aiUsageMonitor.warnThreshold": {
+          "type": "number",
+          "default": 0.8,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "配额预警阈值（0-1）。当配额使用率超过此值时显示警告通知。",
+          "order": 2
+        },
+        "aiUsageMonitor.afkThreshold": {
+          "type": "number",
+          "default": 3600,
+          "minimum": 0,
+          "description": "AFK 检测阈值（秒）。用户无操作超过此时长后暂停自动刷新。设为 0 禁用 AFK 检测。",
+          "order": 3
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "20.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.9"
+  }
+}

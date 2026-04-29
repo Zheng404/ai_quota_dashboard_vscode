@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release and Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          TAG=${{ github.ref_name }}
+          VERSION=${TAG#v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION"
+
+      - name: Update package.json version
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$VERSION" = "$CURRENT" ]; then
+            echo "package.json already at version $VERSION, skipping npm version"
+          else
+            npm version "$VERSION" --git-tag-version=false
+            echo "Updated package.json to version: $VERSION"
+          fi
+
+      - name: Commit version changes
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "chore: bump version to $VERSION"
+          fi
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Compile extension
+        run: npm run compile
+
+      - name: Extract release notes from CHANGELOG
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          awk -v ver="[$VERSION]" '
+            $0 ~ "^## " ver { capture=1; next }
+            capture && $0 ~ "^## \[" { exit }
+            capture { print }
+          ' CHANGELOG.md > .github-release-notes.md
+
+          if [ ! -s .github-release-notes.md ]; then
+            echo "No release notes found for version $VERSION in CHANGELOG.md"
+            echo "Release $VERSION" > .github-release-notes.md
+          fi
+
+          echo "--- Release Notes ---"
+          cat .github-release-notes.md
+          echo "---"
+
+      - name: Package VSIX
+        run: vsce package
+        continue-on-error: false
+
+      - name: Get VSIX filename
+        id: get_filename
+        run: |
+          VSIX_FILE=$(ls *.vsix)
+          echo "VSIX_FILE=$VSIX_FILE" >> $GITHUB_OUTPUT
+          echo "VSIX filename: $VSIX_FILE"
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension-release
+          path: ${{ steps.get_filename.outputs.VSIX_FILE }}
+          retention-days: 90
+
+      - name: Publish to VSCode Marketplace
+        if: env.SKIP_PUBLISH != 'true'
+        run: |
+          vsce publish -p ${{ secrets.VSCE_PAT }}
+        env:
+          SKIP_PUBLISH: ${{ secrets.VSCE_PAT == '' && 'true' || 'false' }}
+
+      - name: Install OVSX
+        if: env.SKIP_PUBLISH != 'true'
+        run: npm install -g ovsx
+        env:
+          SKIP_PUBLISH: ${{ secrets.OPENVSX_PAT == '' && 'true' || 'false' }}
+
+      - name: Publish to Open VSX
+        if: env.SKIP_PUBLISH != 'true'
+        run: |
+          ovsx publish -p ${{ secrets.OPENVSX_PAT }}
+        env:
+          SKIP_PUBLISH: ${{ secrets.OPENVSX_PAT == '' && 'true' || 'false' }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.get_filename.outputs.VSIX_FILE }}
+          body_path: .github-release-notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push version changes to main
+        run: |
+          git fetch origin main
+          git rebase origin/main || git rebase --abort
+          git push origin HEAD:main
+
+      - name: Release summary
+        run: |
+          echo "##  Release Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **VSIX**: ${{ steps.get_filename.outputs.VSIX_FILE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Release**: Created" >> $GITHUB_STEP_SUMMARY

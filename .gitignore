@@ -1,0 +1,65 @@
+# === Compiled output ===
+out/
+dist/
+*.vsix
+
+# === Dependencies ===
+node_modules/
+
+# === AI / Claude context (may contain sensitive paths) ===
+.claude/
+
+# === VSCode / Testing ===
+.vscode-test/
+# .vscode 整个目录不上传（含 launch/tasks/settings，可能有敏感路径）
+.vscode/
+
+# === Logs ===
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# === OS generated files ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# === IDE / Editor ===
+.history/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# === Environment / Secrets ===
+.env
+.env.local
+.env.*.local
+
+# === Package manager ===
+# 注：package-lock.json 推荐上传（确定性安装），主人可按需 git add
+yarn.lock
+pnpm-lock.yaml
+*.tgz
+
+# === Lint / Cache ===
+.eslintcache
+
+# === Coverage ===
+coverage/
+.nyc_output/
+
+# === Temporary files ===
+*.tmp
+*.temp
+.cache/

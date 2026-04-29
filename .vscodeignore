@@ -1,0 +1,22 @@
+# === Source & build config ===
+src/**
+*.ts
+tsconfig.json
+eslint.config.mjs
+
+# === Development tools ===
+.vscode/**
+.claude/**
+.github/**
+
+# === Package manager ===
+.gitignore
+package-lock.json
+
+# === AI project context (not needed by end users) ===
+CLAUDE.md
+
+# === Node modules: only keep codicons runtime files ===
+node_modules/**
+!node_modules/@vscode/codicons/dist/codicon.css
+!node_modules/@vscode/codicons/dist/codicon.ttf
