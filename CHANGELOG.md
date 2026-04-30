@@ -2,6 +2,24 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-04-30
+
+### 新增 (Added)
+
+- **Xiaomi MiMo Token Plan 支持**
+  - 新增 `mimo` 服务包，完整实现 ServiceDescriptor 注册表模式
+  - 配额用量查询：当前套餐 Token 用量、补偿 Token 额度
+  - 套餐详情展示：套餐名称、有效期、过期状态、自动续费状态
+  - Cookie 鉴权（浏览器登录态），支持自定义 endpoint
+  - 状态栏渲染：显示配额百分比和 Token 用量详情
+  - 仪表盘卡片：头部信息（名称+套餐徽章+有效期）+ 配额进度卡片
+  - 帮助提示：Cookie 获取方式引导
+
+### 变更 (Changed)
+
+- 扩展显示名称从 "AI Usage Monitor" 正式更名为 "AI Quota Dashboard"
+- 所有内部标识符统一从 `aiUsageMonitor` 重命名为 `aiQuotaDashboard`
+
 ## [0.1.0] - 2026-04-29
 
 ### 新增 (Added)
@@ -47,4 +65,5 @@
 - Webview JS 为字符串拼接，无类型检查
 - `warnThreshold` 配置声明但未实际触发警告通知
 
+[0.2.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.1.0

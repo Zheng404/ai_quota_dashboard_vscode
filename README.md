@@ -1,6 +1,6 @@
 # AI Quota Dashboard
 
-> VSCode 扩展插件 — AI Coding Plan 配额用量仪表盘。实时追踪 GLM Coding Plan、Kimi Membership 等 AI 服务的配额消耗情况，帮助开发者避免超额使用。
+> VSCode 扩展插件 — AI Coding Plan 配额用量仪表盘。实时追踪 GLM Coding Plan、Kimi Membership、Xiaomi MiMo Token Plan 等 AI 服务的配额消耗情况，帮助开发者避免超额使用。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -8,7 +8,7 @@
 
 | 特性 | 说明 |
 |------|------|
-| **多服务支持** | GLM Coding Plan (CN)、Kimi Membership，易于扩展更多 AI 服务 |
+| **多服务支持** | GLM Coding Plan (CN)、Kimi Membership、Xiaomi MiMo Token Plan，易于扩展更多 AI 服务 |
 | **实时仪表盘** | 侧边栏 Webview 展示配额进度、用量统计、历史趋势 |
 | **状态栏监控** | 底部状态栏实时显示配额使用率和倒计时 |
 | **智能 AFK 检测** | 用户长时间无操作后自动暂停刷新，节省资源 |
@@ -22,6 +22,7 @@
 |------|---------|---------|
 | GLM Coding Plan (CN) | API Key (Bearer Token) | 配额卡片 + 模型/工具用量详情 + SVG 曲线图 |
 | Kimi Membership | JWT Token (浏览器 Cookie) | 配额进度条 + 子限额展示 |
+| Xiaomi MiMo Token Plan | Cookie (浏览器登录态) | 套餐用量统计 + 有效期展示 + 自动续费状态 |
 
 ## 安装
 
@@ -51,6 +52,7 @@ npm run compile
 2. 切换到「设置」标签，添加你的 AI 服务：
    - **GLM**: 输入 API Key（从 [GLM 开放平台](https://open.bigmodel.cn/) 获取）
    - **Kimi**: 输入浏览器 Cookie 中的 JWT Token（按 F12 → Application → Cookies → kimi.com → 复制 `kimi-auth` 的值）
+   - **MiMo**: 输入浏览器 Cookie（按 F12 → Application → Cookies → platform.xiaomimimo.com → 复制任意 Cookie 值）
 3. 返回「仪表盘」标签查看实时配额使用情况
 
 ## 使用指南
@@ -120,7 +122,8 @@ src/
 │   ├── registry.ts           # 服务注册表
 │   ├── types.ts              # 接口定义
 │   ├── glm/                  # GLM 服务包
-│   └── kimi/                 # Kimi 服务包
+│   ├── kimi/                 # Kimi 服务包
+│   └── mimo/                 # MiMo 服务包
 ├── storage/
 │   └── persistence.ts        # 历史数据持久化
 ├── ui/
@@ -142,7 +145,7 @@ src/
 
 ### 新增 AI 服务
 
-1. 在 `src/services/` 创建新目录（结构参考 `glm/` 或 `kimi/`）
+1. 在 `src/services/` 创建新目录（结构参考 `glm/`、`kimi/` 或 `mimo/`）
 2. 实现 `QuotaProvider` 接口（`provider.ts`）
 3. 定义扩展数据类型（`types.ts`）
 4. 编写仪表盘卡片模板（`template.ts`，需注册到 `serviceTemplates.{kind}`）
