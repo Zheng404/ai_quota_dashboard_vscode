@@ -2,7 +2,7 @@
   "name": "ai-quota-dashboard",
   "displayName": "AI Quota Dashboard",
   "description": "Monitor AI Coding Plan quota usage (GLM, Kimi, MiMo, etc.)",
-  "version": "0.2.0",
+  "version": "0.2.5",
   "publisher": "Zheng404",
   "repository": {
     "type": "git",

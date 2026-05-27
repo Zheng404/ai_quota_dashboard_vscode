@@ -66,7 +66,7 @@ async function mimoGet<T>(url: string, cookie: string, timeout = 15000): Promise
 
 /** 配额项名称映射 */
 const ITEM_LABEL_MAP: Record<string, string> = {
-	month_total_token: '当前套餐用量',
+	plan_total_token: '当前套餐用量',
 	compensation_total_token: '补偿 Token 额度',
 };
 
@@ -115,9 +115,9 @@ export const mimoProvider: QuotaProvider = {
 			throw new Error(`MiMo 套餐接口错误: ${detailRes.message || detailRes.code}`);
 		}
 
-		// 解析配额槽位：只显示月度用量（即当前套餐用量）
+		// 解析配额槽位：显示套餐用量 + 补偿 Token（当 limit > 0 时自动展示）
 		const slots: QuotaSlot[] = [];
-		slots.push(...parseCategory(usageRes.data?.monthUsage));
+		slots.push(...parseCategory(usageRes.data?.usage));
 
 		// 提取套餐详情
 		const detail = detailRes.data;

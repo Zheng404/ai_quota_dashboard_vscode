@@ -2,6 +2,13 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.2.5] - 2026-05-27
+
+### 变更 (Changed)
+
+- **MiMo 配额数据源切换**：从 `monthUsage`（月度汇总）改为 `usage`（明细分类），支持分别展示套餐用量（`plan_total_token`）和补偿 Token 额度（`compensation_total_token`）
+  - 当补偿积分 `limit > 0` 时自动显示额外的补偿额度卡片；无补偿时不显示
+
 ## [0.2.0] - 2026-04-30
 
 ### 新增 (Added)
@@ -65,5 +72,6 @@
 - Webview JS 为字符串拼接，无类型检查
 - `warnThreshold` 配置声明但未实际触发警告通知
 
+[0.2.5]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.2.5
 [0.2.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.1.0

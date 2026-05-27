@@ -63,3 +63,9 @@ coverage/
 *.tmp
 *.temp
 .cache/
+.omc/project-memory.json
+.omc/sessions/7fde56d1-e717-4f57-a907-fa679c2d38c8.json
+.omc/state/hud-stdin-cache.json
+.omc/state/sessions/7fde56d1-e717-4f57-a907-fa679c2d38c8/hud-state.json
+.omc/state/sessions/96e10936-f036-43ad-9bfb-1f7c8959d0b4/hud-state.json
+.omc/state/sessions/96e10936-f036-43ad-9bfb-1f7c8959d0b4/session-started.json
