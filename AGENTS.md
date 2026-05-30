@@ -121,7 +121,7 @@ interface ServiceDescriptor {
 pollAll() 定时触发
     │
     ├─ AFK 检测（超阈值则跳过）
-    ├─ 遍历启用的 ServiceProfile
+    ├─ 遍历 ServiceProfile
     │   ├─ 检查内存缓存 (60s TTL)
     │   ├─ resolveProvider(kind) → QuotaProvider.fetch(key, endpoint)
     │   ├─ 返回 ServiceData（服务可扩展专属字段）
@@ -145,7 +145,6 @@ interface ServiceProfile {
   id: string;           // 如 'glm-1714000000000'
   kind: ServiceId;
   displayName: string;
-  enabled: boolean;
   endpoint?: string;
 }
 
@@ -363,7 +362,7 @@ interface StatusBarRenderer<T extends ServiceData = ServiceData> {
 | `refresh` | - | 刷新所有配额 |
 | `refreshService` | `{ id }` | 刷新单个服务 |
 | `requestDetailRange` | `{ serviceId, range }` | 服务详情懒加载（通过 DetailProvider 接口通用化） |
-| `saveService` | `{ id, name, kind, key, enabled }` | 保存服务 |
+| `saveService` | `{ id, name, kind, key }` | 保存服务 |
 | `addService` | `{ kind }` | 添加服务 |
 | `removeService` | `{ id }` | 删除服务 |
 | `saveGlobal` | `{ refreshInterval, warnThreshold, afkThreshold }` | 保存全局设置 |

@@ -243,9 +243,37 @@ pollAll() 定时触发
 | 数据存储 | globalState + Secret Storage |
 | 可视化 | Webview (HTML/CSS/JS + SVG) |
 
+## 更新日志
+
+### v0.2.6 (2026-05-30)
+
+**修复**
+
+- Kimi 配额解析：分钟转小时改用向下取整，避免标签误导
+- Kimi/MiMo 余额配额不再伪造 `used`/`limit` 绝对数值（API 仅返回比率）
+- MiMo 百分比计算改为 `used/limit` 自行计算，避免 API 返回格式歧义
+- 历史数据合并改用本地时区日期去重，修复 UTC 时区偏移问题
+- SVG 图表改为直线连接数据点，避免贝塞尔曲线造成的视觉误导
+- 设置页模板增加 `escapeHtml` 防 XSS
+- pullAll/pullService 并发互斥（`refreshing` 标志），防止数据竞争
+- 详情拉取失败时显示 Warning/Error 提示
+- 刷新按钮 spinning 状态在数据更新后正确恢复
+- `fullCountdown` 测试时间漂移修复
+
+**改进**
+
+- 移除 `ServiceProfile.enabled` 字段及 UI 开关，简化配置模型
+- 配置双写：`globalState` + VSCode Settings API 同步
+- 错误状态缓存 TTL 从 30s 调整为 5 分钟
+- 启动时同步初始活动时间，避免误判 AFK
+- GLM 默认 endpoint 修正为 `https://open.bigmodel.cn`
+- 补充 Kimi/MiMo provider 单元测试（+85 行）
+- README 添加 Open VSX 安装方式
+- `.gitignore` 添加 AGENTS.md 和 opencode.json
+
 ## 已知问题
 
-1. 配置未完全接入 VSCode Settings API — 代码仍读写 `globalState`
+1. 配置双写已实现（globalState + Settings API），但 Webview 设置页仍读写 globalState
 2. Webview JS 为字符串拼接，无类型检查
 3. `warnThreshold` 配置声明但未实际触发警告通知
 
