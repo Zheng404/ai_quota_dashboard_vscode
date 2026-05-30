@@ -51,7 +51,7 @@ export function httpRequest<T>(options: HttpRequestOptions): Promise<T> {
 					const body = Buffer.concat(chunks).toString('utf-8');
 					const contentType = res.headers['content-type'] ?? '';
 
-					if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+					if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
 						// 非 JSON 响应直接返回原始文本
 						if (!contentType.includes('application/json')) {
 							resolve(body as unknown as T);

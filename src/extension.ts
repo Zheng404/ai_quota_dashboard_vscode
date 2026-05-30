@@ -95,21 +95,27 @@ async function fetchSingleService(
 		};
 		bar.feed(errorData);
 		serviceData.set(profile.id, errorData);
-		cache.set(profile.id, errorData, 30); // 错误状态短 TTL，避免频繁重试
+		cache.set(profile.id, errorData, 300); // 错误状态 5 分钟 TTL，避免频繁重试
 		return true; // 错误状态也算有结果
 	}
 }
 
 // 拉取单个服务数据（外部命令调用）
 async function pullService(profileId: string, bar: StatusBar, ctx: vscode.ExtensionContext) {
+	// 防止与 pullAll 并发
+	if (refreshing) {
+		log('刷新进行中，跳过单服务刷新');
+		return;
+	}
+
 	const profiles = config.loadProfiles();
 	const profile = profiles.find(p => p.id === profileId);
-	if (!profile?.enabled) { return; }
+	if (!profile) { return; }
 
 	const historyMap = loadHistory(ctx);
 	await fetchSingleService(profile, historyMap, bar);
 	bar.flush();
-	updateView();
+	await updateView();
 	await saveHistory(ctx, serviceData);
 }
 
@@ -132,7 +138,7 @@ async function pullAll(bar: StatusBar, ctx: vscode.ExtensionContext) {
 	const historyMap = loadHistory(ctx);
 
 	try {
-		for (const profile of config.loadProfiles().filter(p => p.enabled)) {
+		for (const profile of config.loadProfiles()) {
 			// 先读缓存
 			const cached = cache.get(profile.id);
 			if (cached) {
@@ -150,26 +156,32 @@ async function pullAll(bar: StatusBar, ctx: vscode.ExtensionContext) {
 		// 统一渲染
 		if (hasResult) {
 			bar.flush();
-			updateView();
+			await updateView();
 			await saveHistory(ctx, serviceData);
 		}
 	} finally {
 		refreshing = false;
 		if (!hasResult) {
 			bar.setEmpty();
-			updateView();
+			await updateView();
 		}
 	}
 }
 
 // 保存后触发刷新
 async function afterConfigChange(bar: StatusBar, ctx: vscode.ExtensionContext, msg?: string) {
-	// 清空所有缓存（因为配置变了，需要重新拉取）
-	bar.clear();
-	cache.clear();
-	serviceData.clear();
-	// 更新视图（显示新配置）
-	updateView();
+	// 阻止定时器 pullAll 与本函数并发
+	refreshing = true;
+	try {
+		// 清空所有缓存（因为配置变了，需要重新拉取）
+		bar.clear();
+		cache.clear();
+		serviceData.clear();
+		// 更新视图（显示新配置）
+		await updateView();
+	} finally {
+		refreshing = false;
+	}
 	// 刷新数据
 	await pullAll(bar, ctx);
 	if (msg) {
@@ -226,15 +238,18 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const profile = profiles.find(p => p.id === serviceId);
 			if (!profile) { return; }
 
-			const descriptor = getDescriptor(profile.kind);
-			if (!descriptor.detailProvider || !descriptor.mergeDetailData) { return; }
-
 			const key = await config.getKey(serviceId);
 			if (!key) { return; }
 
 			try {
+				const descriptor = getDescriptor(profile.kind);
+				if (!descriptor.detailProvider || !descriptor.mergeDetailData) { return; }
+
 				const detail = await descriptor.detailProvider.fetchDetail(range, key, profile.endpoint);
-				if (!detail) { return; }
+				if (!detail) {
+					vscode.window.showWarningMessage(`未能拉取 ${profile.displayName} 的详情数据，请稍后重试`);
+					return;
+				}
 
 				const existing = serviceData.get(serviceId);
 				if (existing) {
@@ -242,9 +257,10 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 					serviceData.set(serviceId, existing);
 					await updateView();
 				}
-		} catch (e) {
-			logError('拉取详情失败', e);
-		}
+			} catch (e) {
+				logError('拉取详情失败', e);
+				vscode.window.showErrorMessage(`拉取 ${profile.displayName} 详情失败: ${e instanceof Error ? e.message : String(e)}`);
+			}
 		})
 	);
 
@@ -262,7 +278,7 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 				bar.clear();
 				cache.clear();
 				serviceData.clear();
-				updateView();
+				await updateView();
 				vscode.window.showInformationMessage('数据已重置');
 			}
 		})
@@ -280,10 +296,13 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const defaultKind = getAllDescriptors()[0]?.kind ?? 'glm';
 			const kind = isValidServiceId(d.kind) ? d.kind : defaultKind;
 			const key = typeof d.key === 'string' ? d.key : '';
-			const enabled = typeof d.enabled === 'boolean' ? d.enabled : true;
 			if (!id) { return; }
-			await config.updateService(id, { displayName: name, enabled });
-			await config.updateServiceKind(id, kind);
+			await config.updateService(id, { displayName: name });
+			// 仅在 kind 真正变化时才清空并重新设置 key，避免非原子操作丢 Key
+			const oldProfile = config.loadProfiles().find(p => p.id === id);
+			if (oldProfile && oldProfile.kind !== kind) {
+				await config.updateServiceKind(id, kind);
+			}
 			await config.updateServiceKey(id, key);
 			await afterConfigChange(bar, ctx, '服务设置已保存');
 		})
@@ -342,18 +361,16 @@ function registerSettingsCommands(ctx: vscode.ExtensionContext, bar: StatusBar, 
 function registerNavigationCommands(ctx: vscode.ExtensionContext) {
 	// 打开配额面板
 	ctx.subscriptions.push(
-		vscode.commands.registerCommand('aiQuotaDashboard.openDashboard', () => {
-			vscode.commands.executeCommand('aiQuotaDashboard.dashboardView.focus');
+		vscode.commands.registerCommand('aiQuotaDashboard.openDashboard', async () => {
+			await vscode.commands.executeCommand('aiQuotaDashboard.dashboardView.focus');
 		})
 	);
 
 	// 打开服务设置（仪表盘 + 切换到设置标签）
 	ctx.subscriptions.push(
-		vscode.commands.registerCommand('aiQuotaDashboard.openSettings', () => {
-			vscode.commands.executeCommand('aiQuotaDashboard.dashboardView.focus');
-			if (dashboardViewProvider) {
-				dashboardViewProvider.switchToSettings();
-			}
+		vscode.commands.registerCommand('aiQuotaDashboard.openSettings', async () => {
+			await vscode.commands.executeCommand('aiQuotaDashboard.dashboardView.focus');
+			dashboardViewProvider?.switchToSettings();
 		})
 	);
 }
@@ -399,6 +416,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
 			await pullAll(bar, ctx);
 		} catch (err) {
 			logError('轮询异常', err);
+		} finally {
+			// 兜底：确保 refreshing 标志始终被重置
+			refreshing = false;
 		}
 	};
 
@@ -409,6 +429,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
 	registerSettingsCommands(ctx, bar, loop);
 	registerNavigationCommands(ctx);
 	setupActivityListeners(ctx);
+
+	// 同步初始活动时间，避免启动时误判 AFK
+	afkDetector.updateActivity();
 
 	// 启动轮询
 	await startPolling(loop);

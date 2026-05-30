@@ -47,6 +47,8 @@ export interface StatusBarSegment {
 	percentText: string;
 	/** 倒计时文本，如 "2.3h"，空字符串表示无倒计时 */
 	countdownText: string;
+	/** 原始百分比数值（0-100），用于颜色计算 */
+	percent: number;
 }
 
 /** Tooltip 配额行 */

@@ -12,6 +12,7 @@ export const mimoStatusBarRenderer: StatusBarRenderer<MimoServiceData> = {
 		return data.slots.map(s => ({
 			percentText: `${Math.round(s.percent)}%（${fmtNum(s.used)}/${fmtNum(s.limit)}）`,
 			countdownText: '',
+			percent: s.percent,
 		}));
 	},
 

@@ -100,7 +100,7 @@ async function connectPost<T>(url: string, token: string, body: unknown, timeout
 // ========== 数据解析 ==========
 
 /** 解析窗口限制配额（频限明细） */
-function parseWindowSlot(limits: KimiWindowLimit[]): QuotaSlot | undefined {
+export function parseWindowSlot(limits: KimiWindowLimit[]): QuotaSlot | undefined {
 	if (!limits || limits.length === 0) return undefined;
 
 	// 取第一个窗口限制（通常是 5h/300min 限制）
@@ -114,8 +114,8 @@ function parseWindowSlot(limits: KimiWindowLimit[]): QuotaSlot | undefined {
 	let windowLabel = '';
 
 	if (timeUnit === 'TIME_UNIT_MINUTE') {
-		// 分钟转小时显示，如 300min → 5hour
-		const hours = Math.round(duration / 60);
+		// 分钟转小时显示，如 300min → 5hour（向下取整避免误导）
+		const hours = Math.floor(duration / 60);
 		windowLabel = `${hours}hour`;
 	} else if (timeUnit === 'TIME_UNIT_HOUR') {
 		windowLabel = `${duration}hour`;
@@ -141,7 +141,7 @@ function parseWindowSlot(limits: KimiWindowLimit[]): QuotaSlot | undefined {
 }
 
 /** 解析主配额（本周用量） */
-function parseMainSlot(detail: KimiUsageDetail): QuotaSlot | undefined {
+export function parseMainSlot(detail: KimiUsageDetail): QuotaSlot | undefined {
 	if (!detail) return undefined;
 
 	const limit = parseInt(detail.limit ?? '0', 10);
@@ -159,7 +159,7 @@ function parseMainSlot(detail: KimiUsageDetail): QuotaSlot | undefined {
 }
 
 /** 解析余额配额（月权益额度） */
-function parseBalanceSlot(balances: KimiSubscriptionRaw['balances']): QuotaSlot | undefined {
+export function parseBalanceSlot(balances: KimiSubscriptionRaw['balances']): QuotaSlot | undefined {
 	if (!balances || balances.length === 0) return undefined;
 
 	// 取第一个余额项
@@ -170,8 +170,9 @@ function parseBalanceSlot(balances: KimiSubscriptionRaw['balances']): QuotaSlot 
 	return {
 		label: '月权益额度',
 		percent: Math.min(percent, 100),
-		used: percent,
-		limit: 100,
+		// API 仅返回使用率比例，不提供绝对数量
+		used: undefined,
+		limit: undefined,
 		resetsAt: bal.expireTime ? new Date(bal.expireTime).getTime() : undefined,
 	};
 }
@@ -241,8 +242,8 @@ export const kimiProvider: QuotaProvider = {
 				slots.push({
 					label: bal.feature ?? 'Balance',
 					percent: Math.min(ratio * 100, 100),
-					used: ratio * 100,
-					limit: 100,
+					used: undefined,
+					limit: undefined,
 					resetsAt: bal.expireTime ? new Date(bal.expireTime).getTime() : undefined,
 				});
 			}

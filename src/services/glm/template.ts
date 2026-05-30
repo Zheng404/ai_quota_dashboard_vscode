@@ -237,12 +237,10 @@ export function getGlmTemplate(): string {
 			if (pts.length === 1) {
 				return '<circle cx="' + pts[0].x + '" cy="' + pts[0].y + '" r="2" fill="' + color + '"/>';
 			}
-			// 二次贝塞尔平滑曲线：M p0 Q cp1 p1 Q cp2 p2 ...
-			// 控制点取相邻两点的中点
+			// 使用直线连接数据点，避免贝塞尔曲线造成的视觉误导
 			let path = 'M ' + pts[0].x + ' ' + pts[0].y;
 			for (let i = 1; i < pts.length; i++) {
-				const cp = { x: (pts[i-1].x + pts[i].x) / 2, y: (pts[i-1].y + pts[i].y) / 2 };
-				path += ' Q ' + cp.x + ' ' + pts[i-1].y + ' ' + pts[i].x + ' ' + pts[i].y;
+				path += ' L ' + pts[i].x + ' ' + pts[i].y;
 			}
 			return '<path fill="none" stroke="' + color + '" stroke-width="1.5" d="' + path + '" opacity="0.85"/>';
 		}).join('');

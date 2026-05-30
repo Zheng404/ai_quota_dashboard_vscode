@@ -10,13 +10,25 @@ export function setContext(context: vscode.ExtensionContext) {
 
 function getState<T>(key: string, defaultValue: T): T {
 	if (!ctx) return defaultValue;
-	return ctx.globalState.get<T>(key, defaultValue);
+	// 优先读取 globalState，未设置时回退到 workspace configuration
+	const val = ctx.globalState.get<T | undefined>(key, undefined);
+	if (val !== undefined) { return val; }
+	const cfg = vscode.workspace.getConfiguration('aiQuotaDashboard');
+	return cfg.get<T>(key, defaultValue);
 }
 
 async function setState<T>(key: string, value: T): Promise<void> {
 	if (!ctx) return;
 	await ctx.globalState.update(key, value);
+	// 仅对 package.json 中已声明的配置项同步写入 Settings API
+	if (SETTINGS_KEYS.has(key)) {
+		const cfg = vscode.workspace.getConfiguration('aiQuotaDashboard');
+		await cfg.update(key, value, true);
+	}
 }
+
+/** package.json configuration 中声明的配置项 */
+const SETTINGS_KEYS = new Set(['refreshInterval', 'warnThreshold', 'afkThreshold']);
 
 // Secret Storage for sensitive data (API Keys)
 async function getSecret(key: string): Promise<string | undefined> {
@@ -70,7 +82,7 @@ async function setKey(sid: string, key: string) {
 export async function addService(kind: ServiceId, displayName: string): Promise<string> {
 	const profiles = loadProfiles();
 	const id = `${kind}-${Date.now()}`;
-	profiles.push({ id, kind, displayName, enabled: true });
+	profiles.push({ id, kind, displayName });
 	await saveProfiles(profiles);
 	return id;
 }
@@ -89,7 +101,6 @@ export async function updateService(id: string, updates: Partial<Omit<ServicePro
 	const p = profiles.find(x => x.id === id);
 	if (!p) { return; }
 	if (updates.displayName !== undefined) { p.displayName = updates.displayName; }
-	if (updates.enabled !== undefined) { p.enabled = updates.enabled; }
 	if (updates.endpoint !== undefined) { p.endpoint = updates.endpoint; }
 	await saveProfiles(profiles);
 }
@@ -126,6 +137,7 @@ export async function setAfkThreshold(sec: number): Promise<void> {
 
 // ==================== 初始化 ====================
 
+/** 初始化默认配置。当前版本不预置任何服务，由用户手动添加。 */
 export async function initDefaults() {
-	// 默认不添加任何服务，用户需手动添加
+	// Intentionally empty — 保持向后兼容，未来可在此添加迁移逻辑
 }

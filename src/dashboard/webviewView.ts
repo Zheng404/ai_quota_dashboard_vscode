@@ -42,23 +42,23 @@ export class DashboardWebviewViewProvider
 
     webviewView.webview.html = this.getHtml(webviewView.webview);
 
-    webviewView.webview.onDidReceiveMessage((message) => {
+    webviewView.webview.onDidReceiveMessage(async (message) => {
       try {
         switch (message.command) {
           case 'requestInitialData':
             this.update(this.data, this.settings);
             return;
           case 'refresh':
-            vscode.commands.executeCommand('aiQuotaDashboard.refresh');
+            await vscode.commands.executeCommand('aiQuotaDashboard.refresh');
             return;
           case 'refreshService':
-            vscode.commands.executeCommand(
+            await vscode.commands.executeCommand(
               'aiQuotaDashboard.refreshService',
               message.data,
             );
             return;
           case 'requestDetailRange':
-            vscode.commands.executeCommand(
+            await vscode.commands.executeCommand(
               'aiQuotaDashboard.requestDetailRange',
               message.data,
             );
@@ -68,7 +68,7 @@ export class DashboardWebviewViewProvider
           case 'addService':
           case 'removeService':
           case 'resetData':
-            vscode.commands.executeCommand(
+            await vscode.commands.executeCommand(
               `aiQuotaDashboard.${message.command}`,
               message.data,
             );

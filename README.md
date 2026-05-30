@@ -29,17 +29,28 @@
 
 ## 安装
 
-### 从 VSCode 市场安装（推荐）
+### 从应用市场安装（推荐）
 
-<a href="https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard">
-  <img src="https://img.shields.io/visual-studio-marketplace/v/Zheng404.ai-quota-dashboard?label=VSCode%20Marketplace&style=for-the-badge&color=blue" alt="VSCode Marketplace">
-</a>
+<p>
+  <a href="https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard">
+    <img src="https://img.shields.io/visual-studio-marketplace/v/Zheng404.ai-quota-dashboard?label=VSCode%20Marketplace&style=for-the-badge&color=blue" alt="VSCode Marketplace">
+  </a>
+  <a href="https://open-vsx.org/extension/Zheng404/ai-quota-dashboard">
+    <img src="https://img.shields.io/open-vsx/v/Zheng404/ai-quota-dashboard?label=Open%20VSX&style=for-the-badge&color=purple" alt="Open VSX">
+  </a>
+</p>
 
+**VSCode / VSCode Insiders**：
 1. 打开 VSCode，点击左侧活动栏的 **扩展图标** (Ctrl+Shift+X)
 2. 搜索 **"AI Quota Dashboard"**
 3. 点击 **安装**
 
-或直接在浏览器中访问 [市场页面](https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard) 安装。
+**VSCodium / Cursor / Windsurf**（使用 Open VSX）：
+1. 打开扩展面板 (Ctrl+Shift+X)
+2. 搜索 **"AI Quota Dashboard"**
+3. 点击 **安装**
+
+或直接访问 [VSCode 市场](https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard) / [Open VSX](https://open-vsx.org/extension/Zheng404/ai-quota-dashboard) 在浏览器中安装。
 
 ### 从源码安装
 
@@ -187,7 +198,7 @@ src/
 pollAll() 定时触发
     │
     ├─ AFK 检测（超阈值则跳过）
-    ├─ 遍历启用的 ServiceProfile
+    ├─ 遍历 ServiceProfile
     │   ├─ 检查内存缓存 (60s TTL)
     │   ├─ resolveProvider(kind) → QuotaProvider.fetch(key, endpoint)
     │   ├─ 返回 ServiceData

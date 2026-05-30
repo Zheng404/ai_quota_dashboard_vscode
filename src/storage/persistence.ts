@@ -39,9 +39,9 @@ export async function saveHistory(
 
 		const pts: UsagePoint[] = existing[sid] ?? [];
 
-		// 计算当前用量（取第一个 slot 的 used）
+		// 计算当前用量（取第一个 slot 的 used，无 used 时回退到 percent）
 		const mainSlot = data.slots[0];
-		const used = mainSlot?.used ?? 0;
+		const used = mainSlot?.used ?? mainSlot?.percent ?? 0;
 
 		// 添加新的数据点（如果和上一个不同）
 		const last = pts[pts.length - 1];
@@ -88,14 +88,17 @@ export function attachHistory(
 		return { ...data, history: savedHistory };
 	}
 
-	// 合并：按日期去重，优先保留信息更完整的数据点
+	// 合并：按本地日期去重，避免 UTC 时区偏移
+	function dateKey(ts: number): string {
+		const d = new Date(ts);
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+	}
 	const merged = new Map<string, UsagePoint>();
 	for (const p of savedHistory) {
-		const dk = new Date(p.at).toISOString().slice(0, 10);
-		merged.set(dk, p);
+		merged.set(dateKey(p.at), p);
 	}
 	for (const p of apiHistory) {
-		const dk = new Date(p.at).toISOString().slice(0, 10);
+		const dk = dateKey(p.at);
 		const existing = merged.get(dk);
 		// 如果已有数据且信息更完整（有 tokens 和 calls），保留已有的
 		if (existing?.tokens != null && existing.calls != null && (p.tokens == null || p.calls == null)) {

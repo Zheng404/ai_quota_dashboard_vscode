@@ -15,6 +15,7 @@ export const glmStatusBarRenderer: StatusBarRenderer<GlmServiceData> = {
 			.map(s => ({
 				percentText: `${Math.round(s.percent)}%`,
 				countdownText: compactCountdown(s.resetsAt),
+				percent: s.percent,
 			}));
 	},
 

@@ -168,10 +168,7 @@ export class StatusBar {
 		}
 
 		const maxPct = Math.max(
-			...segments.map(s => {
-				const match = s.percentText.match(/(\d+)/);
-				return match ? parseInt(match[1], 10) : 0;
-			}),
+			...segments.map(s => s.percent ?? 0),
 			0,
 		);
 
@@ -232,8 +229,7 @@ export class StatusBar {
 		// 配额区域
 		for (let i = 0; i < quotas.length; i++) {
 			const q = quotas[i];
-			const hasDivider = q.dividerBefore ?? false;
-		if (hasDivider || (i > 0 && !hasDivider)) {
+			if (q.dividerBefore ?? i > 0) {
 				md.appendMarkdown(`---\n\n`);
 			}
 

@@ -13,8 +13,7 @@
   },
   "categories": [
     "Machine Learning",
-    "Visualization",
-    "Other"
+    "Visualization"
   ],
   "icon": "resources/icon.png",
   "keywords": [
@@ -30,7 +29,9 @@
     "onView:aiQuotaDashboard.dashboardView",
     "onCommand:aiQuotaDashboard.refresh",
     "onCommand:aiQuotaDashboard.openDashboard",
-    "onCommand:aiQuotaDashboard.openSettings"
+    "onCommand:aiQuotaDashboard.openSettings",
+    "onCommand:aiQuotaDashboard.clearHistory",
+    "onCommand:aiQuotaDashboard.resetData"
   ],
   "main": "./out/extension.js",
   "contributes": {

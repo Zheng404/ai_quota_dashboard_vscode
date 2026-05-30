@@ -6,7 +6,6 @@ export interface ServiceProfile {
 	id: string;
 	kind: ServiceId;
 	displayName: string;
-	enabled: boolean;
 	endpoint?: string;
 }
 
@@ -43,7 +42,6 @@ export interface SaveServicePayload {
 	name: string;
 	kind: ServiceId;
 	key: string;
-	enabled: boolean;
 }
 
 export interface AddServicePayload {
@@ -78,6 +76,7 @@ export function getColorLevel(pct: number, thresholds?: Partial<ColorThresholds>
 	return 'success';
 }
 
+/** @deprecated 保留供未来使用，当前未引用 */
 export function getColorEmoji(level: ColorLevel): string {
 	switch (level) {
 		case 'danger': return '❌';
@@ -86,6 +85,7 @@ export function getColorEmoji(level: ColorLevel): string {
 	}
 }
 
+/** @deprecated 保留供未来使用，当前未引用 */
 export function getColorCssClass(level: ColorLevel): string {
 	return level;
 }

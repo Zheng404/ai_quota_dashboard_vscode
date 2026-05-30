@@ -12,6 +12,7 @@ export const kimiStatusBarRenderer: StatusBarRenderer<KimiServiceData> = {
 		return data.slots.map(s => ({
 			percentText: `${Math.round(s.percent)}%`,
 			countdownText: compactCountdown(s.resetsAt),
+			percent: s.percent,
 		}));
 	},
 

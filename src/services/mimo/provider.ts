@@ -71,19 +71,22 @@ const ITEM_LABEL_MAP: Record<string, string> = {
 };
 
 /** 解析单个配额项为 QuotaSlot */
-function parseItem(item: MimoUsageItem): QuotaSlot | undefined {
+export function parseItem(item: MimoUsageItem): QuotaSlot | undefined {
 	if (!item || item.limit <= 0) return undefined;
+
+	// 优先用 used/limit 自行计算百分比，避免 API 返回的 percent 字段格式歧义
+	const percent = Math.min((item.used / item.limit) * 100, 100);
 
 	return {
 		label: ITEM_LABEL_MAP[item.name] ?? item.name,
-		percent: Math.min(item.percent * 100, 100),
+		percent,
 		used: item.used,
 		limit: item.limit,
 	};
 }
 
 /** 解析用量分类下的所有配额项 */
-function parseCategory(category: MimoUsageCategory | undefined): QuotaSlot[] {
+export function parseCategory(category: MimoUsageCategory | undefined): QuotaSlot[] {
 	if (!category?.items) return [];
 	const slots: QuotaSlot[] = [];
 	for (const item of category.items) {

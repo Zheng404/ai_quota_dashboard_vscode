@@ -28,6 +28,10 @@ Thumbs.db
 .history/
 .idea/
 
+# === AI Assistant context (may contain sensitive API details) ===
+AGENTS.md
+opencode.json
+
 # === Environment / Secrets ===
 .env
 .env.local

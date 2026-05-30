@@ -140,7 +140,7 @@ export function daysToRange(days: number): TimeRange {
  * - TOKENS_LIMIT, unit=6, number=1 → 每周额度
  * - TIME_LIMIT, unit=5, number=1 → MCP 每月额度
  */
-export const GLM_DEFAULT_ENDPOINT = 'https://open.bigmodel.cn/api/anthropic';
+export const GLM_DEFAULT_ENDPOINT = 'https://open.bigmodel.cn';
 
 function getGlmQuotaLabel(item: RawLimit): string {
 	if (item.type === 'TOKENS_LIMIT') {

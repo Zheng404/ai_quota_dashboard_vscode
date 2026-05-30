@@ -151,20 +151,6 @@ export function getStyles(): string {
 		margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border);
 	}
 
-	/* Toggle Switch */
-	.toggle { position: relative; display: inline-block; width: 32px; height: 18px; flex-shrink: 0; }
-	.toggle input { opacity: 0; width: 0; height: 0; }
-	.toggle-slider {
-		position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-		background: var(--vscode-panel-border); border-radius: 18px; transition: 0.2s;
-	}
-	.toggle-slider:before {
-		position: absolute; content: ""; height: 14px; width: 14px;
-		left: 2px; bottom: 2px; background: white; border-radius: 50%; transition: 0.2s;
-	}
-	.toggle input:checked + .toggle-slider { background: var(--vscode-button-background); }
-	.toggle input:checked + .toggle-slider:before { transform: translateX(14px); }
-
 	/* Stats Grid */
 	.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
 	.stat-item { background: var(--vscode-editor-background); border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 8px; text-align: center; }
