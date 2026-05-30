@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { compactCountdown, fullCountdown } from './statusBarRenderer';
 
 describe('compactCountdown', () => {
@@ -15,15 +15,20 @@ describe('compactCountdown', () => {
 	});
 
 	it('formats hours with decimal', () => {
-		expect(compactCountdown(Date.now() + 2.5 * 3600000)).toMatch(/2.5h/);
+		expect(compactCountdown(Date.now() + 2.5 * 3600000)).toMatch(/2\.5h/);
 	});
 
 	it('formats days with decimal', () => {
-		expect(compactCountdown(Date.now() + 2 * 86400000)).toMatch(/2.0d/);
+		expect(compactCountdown(Date.now() + 2 * 86400000)).toMatch(/2\.0d/);
 	});
 });
 
 describe('fullCountdown', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date('2025-06-01T12:00:00Z'));
+	});
+
 	it('returns N/A for undefined', () => {
 		expect(fullCountdown(undefined)).toBe('N/A');
 	});
@@ -33,17 +38,14 @@ describe('fullCountdown', () => {
 	});
 
 	it('formats minutes only', () => {
-		const ts = Date.now() + 30 * 60000;
-		expect(fullCountdown(ts)).toBe('30分');
+		expect(fullCountdown(Date.now() + 30 * 60000)).toBe('30分');
 	});
 
 	it('formats hours and minutes', () => {
-		const ts = Date.now() + 2 * 3600000 + 30 * 60000;
-		expect(fullCountdown(ts)).toBe('2时30分');
+		expect(fullCountdown(Date.now() + 2 * 3600000 + 30 * 60000)).toBe('2时30分');
 	});
 
 	it('formats days hours and minutes', () => {
-		const ts = Date.now() + 86400000 + 2 * 3600000 + 30 * 60000;
-		expect(fullCountdown(ts)).toBe('1天2时30分');
+		expect(fullCountdown(Date.now() + 86400000 + 2 * 3600000 + 30 * 60000)).toBe('1天2时30分');
 	});
 });
