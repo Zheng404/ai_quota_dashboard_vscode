@@ -29,6 +29,18 @@
 
 ## 安装
 
+### 从 VSCode 市场安装（推荐）
+
+<a href="https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard">
+  <img src="https://img.shields.io/visual-studio-marketplace/v/Zheng404.ai-quota-dashboard?label=VSCode%20Marketplace&style=for-the-badge&color=blue" alt="VSCode Marketplace">
+</a>
+
+1. 打开 VSCode，点击左侧活动栏的 **扩展图标** (Ctrl+Shift+X)
+2. 搜索 **"AI Quota Dashboard"**
+3. 点击 **安装**
+
+或直接在浏览器中访问 [市场页面](https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard) 安装。
+
 ### 从源码安装
 
 ```bash
@@ -44,10 +56,6 @@ npm run compile
 
 # 在 VSCode 中按 F5 启动调试，或打包安装
 ```
-
-### VSCode 市场（待发布）
-
-搜索 "AI Quota Dashboard" 并安装。
 
 ## 快速开始
 
