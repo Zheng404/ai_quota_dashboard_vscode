@@ -6,14 +6,9 @@ dist/
 # === Dependencies ===
 node_modules/
 
-# === AI / Claude context (may contain sensitive paths) ===
-.claude/
-.omc/
-
 # === VSCode / Testing ===
 .vscode-test/
-# .vscode 整个目录不上传（含 launch/tasks/settings，可能有敏感路径）
-.vscode/
+.vscode/settings.json
 
 # === Logs ===
 logs/
@@ -21,8 +16,6 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
 # === OS generated files ===
 .DS_Store
@@ -48,7 +41,6 @@ Thumbs.db
 .env.*.local
 
 # === Package manager ===
-# 注：package-lock.json 推荐上传（确定性安装），主人可按需 git add
 yarn.lock
 pnpm-lock.yaml
 *.tgz

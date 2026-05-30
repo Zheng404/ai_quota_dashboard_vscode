@@ -4,6 +4,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+<!-- TODO: 添加仪表盘截图 -->
+<!-- ![仪表盘截图](resources/screenshot-dashboard.png) -->
+
 ## 功能特性
 
 | 特性 | 说明 |
@@ -12,7 +15,7 @@
 | **实时仪表盘** | 侧边栏 Webview 展示配额进度、用量统计、历史趋势 |
 | **状态栏监控** | 底部状态栏实时显示配额使用率和倒计时 |
 | **智能 AFK 检测** | 用户长时间无操作后自动暂停刷新，节省资源 |
-| **配额预警** | 使用率超过阈值时显示警告颜色 |
+| **配额预警** | 使用率超过阈值时状态栏显示警告颜色（黄/红） |
 | **GLM 详情分析** | 模型用量 / 工具用量详情，支持 SVG 曲线图展示 |
 | **数据本地存储** | 所有配额数据存储在本地，不上传云端 |
 
@@ -21,8 +24,8 @@
 | 服务 | 鉴权方式 | 特色功能 |
 |------|---------|---------|
 | GLM Coding Plan (CN) | API Key (Bearer Token) | 配额卡片 + 模型/工具用量详情 + SVG 曲线图 |
-| Kimi Membership | JWT Token (浏览器 Cookie) | 配额进度条 + 子限额展示 |
-| Xiaomi MiMo Token Plan | Cookie (浏览器登录态) | 套餐用量统计 + 有效期展示 + 自动续费状态 |
+| Kimi Membership | JWT Token (浏览器 Cookie) | 配额进度条 + 子限额展示 + 会员等级 |
+| Xiaomi MiMo Token Plan | Cookie (浏览器登录态) | 套餐用量统计 + 补偿 Token 额度 + 有效期展示 |
 
 ## 安装
 
@@ -76,7 +79,7 @@ npm run compile
 | 设置项 | 默认值 | 说明 |
 |--------|--------|------|
 | 自动刷新间隔 | 600 秒 | 设为 0 禁用自动刷新 |
-| 配额预警阈值 | 0.8 (80%) | 使用率超过此值显示警告 |
+| 配额预警阈值 | 0.8 (80%) | 使用率超过此值状态栏显示警告颜色 |
 | AFK 检测阈值 | 3600 秒 | 无操作超此时长后暂停刷新 |
 
 ## 开发
@@ -102,6 +105,20 @@ npm run test:watch
 
 - VSCode 1.80+
 - Node.js 18+
+
+### 测试
+
+项目使用 **vitest** 作为测试框架。测试文件与源码同目录，命名 `{source}.test.ts`：
+
+```bash
+# 运行所有测试
+npm test
+
+# 监听模式
+npm run test:watch
+```
+
+测试覆盖核心模块（缓存、AFK、格式化、类型计算）和各服务的 provider 数据解析逻辑。
 
 ## 架构
 
@@ -183,6 +200,17 @@ pollAll() 定时触发
 | 预警阈值 | `globalState` | `warnThreshold` |
 | AFK 阈值 | `globalState` | `afkThreshold` |
 | 历史数据 | `globalState` | `aiQuotaDashboard.history` |
+
+## 故障排查
+
+| 问题 | 原因 | 解决方案 |
+|------|------|---------|
+| 状态栏显示 `?` | 该服务未实现 `StatusBarRenderer` | 检查服务包是否包含 `statusBar.ts` |
+| GLM 提示鉴权失败 | API Key 无效或过期 | 在 [GLM 开放平台](https://open.bigmodel.cn/) 重新生成 API Key |
+| Kimi 提示鉴权失败 | 使用了 API Key 而非 JWT Token | 使用浏览器开发者工具获取 `kimi-auth` Cookie 值 |
+| 仪表盘数据不更新 | 缓存未过期或 AFK 状态 | 点击刷新按钮手动刷新，或检查键盘/鼠标操作恢复活动状态 |
+| 历史数据丢失 | 超过 30 天保留期 | 历史数据自动清理，如需长期保存请定期备份 |
+| 编译报错 `Cannot find module 'vscode'` | 未安装 VSCode 类型定义 | 运行 `npm install` 确保 `@types/vscode` 已安装 |
 
 ## 技术栈
 

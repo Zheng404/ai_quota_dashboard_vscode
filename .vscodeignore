@@ -3,10 +3,10 @@ src/**
 *.ts
 tsconfig.json
 eslint.config.mjs
+vitest.config.ts
 
 # === Development tools ===
 .vscode/**
-.claude/**
 .github/**
 
 # === Package manager ===
@@ -14,9 +14,8 @@ eslint.config.mjs
 package-lock.json
 
 # === AI project context (not needed by end users) ===
-CLAUDE.md
+AGENTS.md
+opencode.json
 
-# === Node modules: only keep codicons runtime files ===
+# === Node modules ===
 node_modules/**
-!node_modules/@vscode/codicons/dist/codicon.css
-!node_modules/@vscode/codicons/dist/codicon.ttf
