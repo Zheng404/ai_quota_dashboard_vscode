@@ -17,6 +17,18 @@ const serviceData = new Map<string, ServiceData>();
 let dashboardViewProvider: DashboardWebviewViewProvider;
 const afkDetector = new AfkDetector();
 
+// OutputChannel 用于替代 console.log/error
+const outputChannel = vscode.window.createOutputChannel('AI Quota Dashboard');
+
+function log(message: string): void {
+	outputChannel.appendLine(`[INFO] ${message}`);
+}
+
+function logError(message: string, err?: unknown): void {
+	const detail = err instanceof Error ? err.message : String(err);
+	outputChannel.appendLine(`[ERROR] ${message}: ${detail}`);
+}
+
 function restartTimer(loopFn: () => Promise<void>) {
 	if (timer) {
 		clearInterval(timer);
@@ -71,7 +83,7 @@ async function fetchSingleService(
 		return true;
 
 	} catch (err) {
-		console.error(`[${profile.id}]`, err);
+		logError(`[${profile.id}] 拉取失败`, err);
 		const msg = err instanceof Error ? err.message : String(err);
 		const errorData: ServiceData = {
 			id: profile.id,
@@ -105,12 +117,12 @@ async function pullService(profileId: string, bar: StatusBar, ctx: vscode.Extens
 async function pullAll(bar: StatusBar, ctx: vscode.ExtensionContext) {
 	// AFK 检测
 	if (afkDetector.checkAfk(config.afkThreshold())) {
-		console.log('[AI Quota Dashboard] AFK 中，跳过刷新');
+		log('AFK 中，跳过刷新');
 		return;
 	}
 
 	if (refreshing) {
-		console.log('[AI Quota Dashboard] 刷新进行中，跳过本次请求');
+		log('刷新进行中，跳过本次请求');
 		return;
 	}
 	refreshing = true;
@@ -230,9 +242,9 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 					serviceData.set(serviceId, existing);
 					await updateView();
 				}
-			} catch (e) {
-				console.error('[AI Quota Dashboard] 拉取详情失败:', e instanceof Error ? e.message : e);
-			}
+		} catch (e) {
+			logError('拉取详情失败', e);
+		}
 		})
 	);
 
@@ -368,7 +380,7 @@ async function startPolling(loop: () => Promise<void>) {
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
-	console.log('AI Quota Dashboard: activate');
+	log('activate');
 
 	config.setContext(ctx);
 	await config.initDefaults();
@@ -386,7 +398,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
 		try {
 			await pullAll(bar, ctx);
 		} catch (err) {
-			console.error('[AI Quota Dashboard] 轮询异常:', err);
+			logError('轮询异常', err);
 		}
 	};
 
@@ -408,4 +420,5 @@ export function deactivate() {
 		timer = undefined;
 	}
 	cache.dispose();
+	outputChannel.dispose();
 }

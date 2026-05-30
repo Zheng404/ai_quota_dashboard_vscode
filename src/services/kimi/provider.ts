@@ -121,6 +121,9 @@ function parseWindowSlot(limits: KimiWindowLimit[]): QuotaSlot | undefined {
 		windowLabel = `${duration}hour`;
 	} else if (timeUnit === 'TIME_UNIT_DAY') {
 		windowLabel = `${duration}day`;
+	} else {
+		// 未知时间单位，使用原始值
+		windowLabel = duration > 0 ? `${duration}` : 'unknown';
 	}
 
 	const limit = parseInt(limDetail.limit ?? '0', 10);

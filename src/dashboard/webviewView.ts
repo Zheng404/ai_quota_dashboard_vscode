@@ -1,8 +1,8 @@
-import * as vscode from "vscode";
-import { ServiceData, ServiceProfile } from "../core/types";
-import { getStyles } from "./styles";
-import { getScript } from "./templates/index";
-import { getAllDescriptors } from "../services/registry";
+import * as vscode from 'vscode';
+import { ServiceData, ServiceProfile } from '../core/types';
+import { getStyles } from './styles';
+import { getScript } from './templates/index';
+import { getAllDescriptors } from '../services/registry';
 
 export interface SettingsData {
   profiles: ServiceProfile[];
@@ -15,7 +15,7 @@ export interface SettingsData {
 export class DashboardWebviewViewProvider
   implements vscode.WebviewViewProvider
 {
-  public static readonly viewType = "aiQuotaDashboard.dashboardView";
+  public static readonly viewType = 'aiQuotaDashboard.dashboardView';
 
   private view?: vscode.WebviewView;
   private data = new Map<string, ServiceData>();
@@ -45,29 +45,29 @@ export class DashboardWebviewViewProvider
     webviewView.webview.onDidReceiveMessage((message) => {
       try {
         switch (message.command) {
-          case "requestInitialData":
+          case 'requestInitialData':
             this.update(this.data, this.settings);
             return;
-          case "refresh":
-            vscode.commands.executeCommand("aiQuotaDashboard.refresh");
+          case 'refresh':
+            vscode.commands.executeCommand('aiQuotaDashboard.refresh');
             return;
-          case "refreshService":
+          case 'refreshService':
             vscode.commands.executeCommand(
-              "aiQuotaDashboard.refreshService",
+              'aiQuotaDashboard.refreshService',
               message.data,
             );
             return;
-          case "requestDetailRange":
+          case 'requestDetailRange':
             vscode.commands.executeCommand(
-              "aiQuotaDashboard.requestDetailRange",
+              'aiQuotaDashboard.requestDetailRange',
               message.data,
             );
             return;
-          case "saveService":
-          case "saveGlobal":
-          case "addService":
-          case "removeService":
-          case "resetData":
+          case 'saveService':
+          case 'saveGlobal':
+          case 'addService':
+          case 'removeService':
+          case 'resetData':
             vscode.commands.executeCommand(
               `aiQuotaDashboard.${message.command}`,
               message.data,
@@ -79,15 +79,14 @@ export class DashboardWebviewViewProvider
               (d) => d.helpCommand === message.command,
             );
             if (desc?.helpMessage) {
-              vscode.window.showInformationMessage(desc.helpMessage, "确定");
+              vscode.window.showInformationMessage(desc.helpMessage, '确定');
               return;
             }
           }
         }
       } catch (err) {
-        console.error('[AI Quota Dashboard] Webview 消息处理异常:', err);
         vscode.window.showErrorMessage(
-          `Webview 消息处理失败: ${err instanceof Error ? err.message : String(err)}`
+          `Webview 消息处理失败: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     });
@@ -100,7 +99,7 @@ export class DashboardWebviewViewProvider
     }
     if (this.view) {
       this.view.webview.postMessage({
-        command: "updateData",
+        command: 'updateData',
         services: Array.from(this.data.values()),
         settings: this.settings,
       });
@@ -110,8 +109,8 @@ export class DashboardWebviewViewProvider
   switchToSettings() {
     if (this.view) {
       this.view.webview.postMessage({
-        command: "switchToSettings",
-        subtab: "services",
+        command: 'switchToSettings',
+        subtab: 'services',
       });
     }
   }

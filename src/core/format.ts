@@ -1,4 +1,7 @@
-/** 格式化数字（用于状态栏、Tooltip 等展示） */
+/** 格式化数字为 K/M/B 缩写
+ * @param n - 要格式化的数字
+ * @returns 格式化后的字符串，如 '1.5K', '3.2M', '-'（当 n 为 null/undefined 时）
+ */
 export function fmtNum(n?: number): string {
 	if (n == null) { return '-'; }
 	if (n >= 1e9) { return (n / 1e9).toFixed(2) + 'B'; }

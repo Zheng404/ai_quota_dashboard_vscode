@@ -12,6 +12,8 @@
     "vscode": "^1.80.0"
   },
   "categories": [
+    "Machine Learning",
+    "Visualization",
     "Other"
   ],
   "icon": "resources/icon.png",
@@ -25,7 +27,10 @@
     "coding-plan"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onView:aiQuotaDashboard.dashboardView",
+    "onCommand:aiQuotaDashboard.refresh",
+    "onCommand:aiQuotaDashboard.openDashboard",
+    "onCommand:aiQuotaDashboard.openSettings"
   ],
   "main": "./out/extension.js",
   "contributes": {

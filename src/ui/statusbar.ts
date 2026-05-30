@@ -9,10 +9,12 @@ export class StatusBar {
 	private items = new Map<string, vscode.StatusBarItem>();
 	private cache = new Map<string, ServiceData>();
 	private emptyItem?: vscode.StatusBarItem;
+	private rendererCache = new Map<string, StatusBarRenderer | null>();
 
 	/** 清除所有缓存数据和状态栏项 */
 	clear() {
 		this.cache.clear();
+		this.rendererCache.clear();
 		for (const item of this.items.values()) {
 			item.dispose();
 		}
@@ -124,7 +126,7 @@ export class StatusBar {
 				continue;
 			}
 
-			// 通用渲染：查找注册的状态栏渲染器
+			// 通用渲染：查找注册的状态栏渲染器（每个 kind 只查一次）
 			const renderer = this.resolveRenderer(d.kind);
 			if (renderer) {
 				this.renderWithRenderer(item, d, renderer);
@@ -139,10 +141,17 @@ export class StatusBar {
 	}
 
 	private resolveRenderer(kind: string): StatusBarRenderer | undefined {
+		const cached = this.rendererCache.get(kind);
+		if (cached !== undefined) {
+			return cached ?? undefined;
+		}
 		try {
 			const desc = getDescriptor(kind);
+			const renderer = desc.statusBarRenderer ?? null;
+			this.rendererCache.set(kind, renderer);
 			return desc.statusBarRenderer;
 		} catch {
+			this.rendererCache.set(kind, null);
 			return undefined;
 		}
 	}
@@ -223,7 +232,8 @@ export class StatusBar {
 		// 配额区域
 		for (let i = 0; i < quotas.length; i++) {
 			const q = quotas[i];
-			if (q.dividerBefore || (i > 0 && !q.dividerBefore)) {
+			const hasDivider = q.dividerBefore ?? false;
+		if (hasDivider || (i > 0 && !hasDivider)) {
 				md.appendMarkdown(`---\n\n`);
 			}
 

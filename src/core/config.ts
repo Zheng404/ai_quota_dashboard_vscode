@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ServiceProfile, ServiceId } from './types';
 
 // 全局 ExtensionContext，用于访问 globalState
-let ctx: vscode.ExtensionContext;
+let ctx: vscode.ExtensionContext | undefined;
 
 export function setContext(context: vscode.ExtensionContext) {
 	ctx = context;

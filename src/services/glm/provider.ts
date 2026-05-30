@@ -135,24 +135,48 @@ export function daysToRange(days: number): TimeRange {
 
 /**
  * 解析用量统计限额
- * 数据结构：
- * - limits[0]: 每5小时额度 (TOKENS_LIMIT, unit=3, number=5)
- * - limits[1]: 每周额度 (TOKENS_LIMIT, unit=6, number=1)
- * - limits[2]: MCP每月额度 (TIME_LIMIT, unit=5, number=1, 有 usage/currentValue/remaining/usageDetails)
+ * 根据 unit/number 字段判断配额类型，不依赖数组顺序：
+ * - TOKENS_LIMIT, unit=3, number=5 → 每5小时额度
+ * - TOKENS_LIMIT, unit=6, number=1 → 每周额度
+ * - TIME_LIMIT, unit=5, number=1 → MCP 每月额度
  */
 export const GLM_DEFAULT_ENDPOINT = 'https://open.bigmodel.cn/api/anthropic';
+
+function getGlmQuotaLabel(item: RawLimit): string {
+	if (item.type === 'TOKENS_LIMIT') {
+		// unit=3 表示小时，number=5 表示每5小时
+		if (item.unit === 3 && item.number === 5) {
+			return '每5小时额度';
+		}
+		// unit=6 表示周，number=1 表示每周
+		if (item.unit === 6 && item.number === 1) {
+			return '每周额度';
+		}
+		return `额度 (${item.number}${getTimeUnitLabel(item.unit)})`;
+	}
+	if (item.type === 'TIME_LIMIT') {
+		return 'MCP 每月额度';
+	}
+	return '未知额度';
+}
+
+function getTimeUnitLabel(unit: number): string {
+	switch (unit) {
+		case 3: return '小时';
+		case 5: return '月';
+		case 6: return '周';
+		default: return '';
+	}
+}
 
 function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: QuotaSlot[]; level?: string } {
 	const limits = raw.limits ?? [];
 	const slots: QuotaSlot[] = [];
-	let tokenCount = 0;
 
 	for (const item of limits) {
 		if (item.type === 'TOKENS_LIMIT') {
-			const is5h = tokenCount === 0;
-			tokenCount++;
 			slots.push({
-				label: is5h ? '每5小时额度' : '每周额度',
+				label: getGlmQuotaLabel(item),
 				percent: item.percentage,
 				used: undefined,
 				limit: undefined,
@@ -160,7 +184,7 @@ function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: Quo
 			});
 		} else if (item.type === 'TIME_LIMIT') {
 			slots.push({
-				label: 'MCP 每月额度',
+				label: getGlmQuotaLabel(item),
 				percent: item.percentage,
 				used: item.currentValue,
 				limit: item.usage,
@@ -255,8 +279,8 @@ export async function fetchGlmModelUsage(
 		if (raw.code === 200 && raw.success && raw.data) {
 			return parseModelUsage(raw.data);
 		}
-	} catch (e) {
-		console.warn('[GLM Provider] 模型用量查询失败:', e instanceof Error ? e.message : e);
+	} catch {
+		// 错误静默处理，返回 undefined 让调用方决定
 	}
 	return undefined;
 }
@@ -275,8 +299,8 @@ export async function fetchGlmToolUsage(
 		if (raw.code === 200 && raw.success && raw.data) {
 			return parseToolUsage(raw.data);
 		}
-	} catch (e) {
-		console.warn('[GLM Provider] 工具用量查询失败:', e instanceof Error ? e.message : e);
+	} catch {
+		// 错误静默处理，返回 undefined 让调用方决定
 	}
 	return undefined;
 }

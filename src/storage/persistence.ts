@@ -34,7 +34,8 @@ export async function saveHistory(
 	const merged: StoredHistory = {};
 
 	for (const [sid, data] of dataMap) {
-		if (data.err || data.slots.length === 0) { continue; }
+		if (data.err) { continue; }
+		if (data.slots.length === 0) { continue; }
 
 		const pts: UsagePoint[] = existing[sid] ?? [];
 

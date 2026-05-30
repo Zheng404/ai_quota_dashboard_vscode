@@ -9,7 +9,7 @@ export class CacheManager {
 		this.cleanupTimer = setInterval(() => {
 			const now = Date.now();
 			for (const [key, entry] of this.cache) {
-				if (now > entry.expires) {
+				if (now >= entry.expires) {
 					this.cache.delete(key);
 				}
 			}
@@ -19,7 +19,7 @@ export class CacheManager {
 	get(id: string): ServiceData | undefined {
 		const entry = this.cache.get(id);
 		if (!entry) { return undefined; }
-		if (Date.now() > entry.expires) {
+		if (Date.now() >= entry.expires) {
 			this.cache.delete(id);
 			return undefined;
 		}

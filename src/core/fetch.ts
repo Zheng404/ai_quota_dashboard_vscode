@@ -9,8 +9,28 @@ export interface HttpRequestOptions {
 	timeout?: number;
 }
 
+export interface HttpError extends Error {
+	statusCode?: number;
+	url?: string;
+	responseBody?: string;
+}
+
+function createHttpError(
+	message: string,
+	statusCode?: number,
+	url?: string,
+	responseBody?: string,
+): HttpError {
+	const err = new Error(message) as HttpError;
+	err.statusCode = statusCode;
+	err.url = url;
+	err.responseBody = responseBody;
+	return err;
+}
+
 /**
  * 底层 HTTPS 请求封装
+ * 使用 Buffer 数组累积响应，避免大响应时字符串拼接性能问题
  */
 export function httpRequest<T>(options: HttpRequestOptions): Promise<T> {
 	return new Promise((resolve, reject) => {
@@ -24,23 +44,38 @@ export function httpRequest<T>(options: HttpRequestOptions): Promise<T> {
 				headers: options.headers,
 			},
 			(res) => {
-				let body = '';
-				res.on('error', reject);
-				res.on('data', (c) => { body += c; });
+				const chunks: Buffer[] = [];
+				res.on('error', (err) => reject(createHttpError(err.message, res.statusCode ?? undefined, options.url)));
+				res.on('data', (chunk) => { chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); });
 				res.on('end', () => {
+					const body = Buffer.concat(chunks).toString('utf-8');
+					const contentType = res.headers['content-type'] ?? '';
+
 					if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+						// 非 JSON 响应直接返回原始文本
+						if (!contentType.includes('application/json')) {
+							resolve(body as unknown as T);
+							return;
+						}
 						try { resolve(JSON.parse(body)); }
-						catch { reject(new Error('JSON parse error')); }
+						catch {
+							reject(createHttpError('JSON parse error', res.statusCode, options.url, body.slice(0, 500)));
+						}
 					} else {
-						reject(new Error(`HTTP ${res.statusCode}: ${body.slice(0, 500)}`));
+						reject(createHttpError(
+							`HTTP ${res.statusCode}`,
+							res.statusCode ?? undefined,
+							options.url,
+							body.slice(0, 500),
+						));
 					}
 				});
-			}
+			},
 		);
-		req.on('error', reject);
+		req.on('error', (err) => reject(createHttpError(err.message, undefined, options.url)));
 		req.setTimeout(options.timeout ?? 30000, () => {
 			req.destroy();
-			reject(new Error(`请求超时: ${u.hostname}${u.pathname}`));
+			reject(createHttpError(`请求超时: ${u.hostname}${u.pathname}`, undefined, options.url));
 		});
 		if (options.body) {
 			req.write(options.body);
