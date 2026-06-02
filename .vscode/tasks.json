@@ -12,6 +12,9 @@
       "group": {
         "kind": "build",
         "isDefault": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/vscode"
       }
     },
     {
@@ -20,6 +23,9 @@
       "group": "build",
       "presentation": {
         "reveal": "never"
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/vscode"
       }
     }
   ]

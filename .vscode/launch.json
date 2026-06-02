@@ -6,10 +6,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode"
       ],
       "outFiles": [
-        "${workspaceFolder}/out/**/*.js"
+        "${workspaceFolder}/vscode/out/**/*.js"
       ],
       "preLaunchTask": "${defaultBuildTask}"
     },
@@ -18,11 +18,11 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}",
-        "--extensionTestsPath=${workspaceFolder}/out/test/suite/index"
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode",
+        "--extensionTestsPath=${workspaceFolder}/vscode/out/test/suite/index"
       ],
       "outFiles": [
-        "${workspaceFolder}/out/**/*.js"
+        "${workspaceFolder}/vscode/out/**/*.js"
       ],
       "preLaunchTask": "${defaultBuildTask}"
     }

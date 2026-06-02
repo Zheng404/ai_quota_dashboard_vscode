@@ -1,0 +1,42 @@
+# ============================================
+# AI Quota Dashboard — VSCode Extension Ignore
+# Controls what vsce excludes when packaging .vsix
+# ============================================
+
+# === Source & Build Config ===
+src/**
+*.ts
+tsconfig.json
+eslint.config.mjs
+vitest.config.ts
+
+# === Compiled Test Artifacts ===
+# (测试文件不需要打包到扩展中)
+out/test/
+out/**/*.test.js
+out/**/*.map
+
+# === Development Tools ===
+.vscode/**
+.github/**
+.vscodeignore
+.gitignore
+
+# === Package Manager ===
+package-lock.json
+
+# === Dependencies ===
+# (vsce 会自动执行 npm install --production，不需要打包 node_modules)
+node_modules/**
+
+# === Resources — Source Files ===
+# (SVG 源文件保留在仓库中，只打包编译后的 PNG 图标)
+resources/*.svg
+
+# === AI Project Context ===
+AGENTS.md
+opencode.json
+
+# === Cache & Logs ===
+.eslintcache
+*.log

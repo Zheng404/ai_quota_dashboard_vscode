@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src https://*.kimi.com https://*.xiaomimimo.com http://127.0.0.1:*; style-src 'unsafe-inline';">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 280px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #333;
+      background: #fff;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      background: #f5f5f5;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.disconnected { background: #ef4444; }
+    .status-text { font-size: 12px; }
+    .services {
+      margin-bottom: 12px;
+    }
+    .service-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+      font-size: 12px;
+    }
+    .service-item:last-child { border-bottom: none; }
+    .service-name { font-weight: 500; }
+    .service-status {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .service-status.found { background: #dcfce7; color: #166534; }
+    .service-status.missing { background: #fef2f2; color: #991b1b; }
+    button {
+      width: 100%;
+      padding: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-sync {
+      background: #7c3aed;
+      color: #fff;
+    }
+    .btn-sync:hover { background: #6d28d9; }
+    .btn-sync:disabled {
+      background: #d1d5db;
+      cursor: not-allowed;
+    }
+    .hint {
+      margin-top: 12px;
+      font-size: 11px;
+      color: #888;
+      line-height: 1.4;
+    }
+    .time { font-size: 10px; color: #aaa; margin-top: 8px; text-align: right; }
+  </style>
+</head>
+<body>
+  <h1>🍪 Cookie Bridge</h1>
+
+  <div class="status" id="status">
+    <span class="status-dot" id="status-dot"></span>
+    <span class="status-text" id="status-text">检测中...</span>
+  </div>
+
+  <div class="services" id="services"></div>
+
+  <button class="btn-sync" id="sync-btn">立即同步</button>
+
+  <p class="hint">
+    确保已在浏览器中登录 Kimi 和 MiMo 平台。<br>
+    VSCode 扩展需处于运行状态。
+  </p>
+
+  <div class="time" id="last-sync"></div>
+
+  <script src="scripts/popup.js"></script>
+</body>
+</html>
