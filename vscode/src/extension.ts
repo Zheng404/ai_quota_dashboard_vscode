@@ -15,9 +15,10 @@ let timer: NodeJS.Timeout | undefined;
 
 const cache = new CacheManager();
 const serviceData = new Map<string, ServiceData>();
-let dashboardViewProvider: DashboardWebviewViewProvider;
+let dashboardViewProvider!: DashboardWebviewViewProvider;
 const afkDetector = new AfkDetector();
 let bridge: CookieBridgeServer | undefined;
+let isLoopRunning = false;
 
 /** 串行任务队列，防止 pullService / pullAll / afterConfigChange 并发 */
 class AsyncQueue {
@@ -208,6 +209,10 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 	// 刷新命令
 	ctx.subscriptions.push(
 		vscode.commands.registerCommand('aiQuotaDashboard.refresh', async () => {
+			if (afkDetector.checkAfk(config.afkThreshold())) {
+				vscode.window.showInformationMessage('AFK 中，跳过刷新');
+				return;
+			}
 			bar.setLoading();
 			cache.clear();
 			serviceData.clear();
@@ -243,10 +248,17 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const key = await config.getKey(serviceId);
 			if (!key) { return; }
 
+			let descriptor;
 			try {
-				const descriptor = getDescriptor(profile.kind);
-				if (!descriptor.detailProvider || !descriptor.mergeDetailData) { return; }
+				descriptor = getDescriptor(profile.kind);
+			} catch (e) {
+				logError(`获取服务描述符失败: ${profile.kind}`, e);
+				vscode.window.showErrorMessage(`获取 ${profile.displayName} 服务描述符失败`);
+				return;
+			}
+			if (!descriptor.detailProvider || !descriptor.mergeDetailData) { return; }
 
+			try {
 				const detail = await descriptor.detailProvider.fetchDetail(range, key, profile.endpoint);
 				if (!detail) {
 					vscode.window.showWarningMessage(`未能拉取 ${profile.displayName} 的详情数据，请稍后重试`);
@@ -257,6 +269,7 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 				if (existing) {
 					descriptor.mergeDetailData(existing, detail, range);
 					serviceData.set(serviceId, existing);
+					cache.set(serviceId, existing, 60);
 					await updateView();
 				}
 			} catch (e) {
@@ -303,8 +316,14 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			await config.updateService(id, { displayName: name });
 			// 仅在 kind 真正变化时才清空并重新设置 key，避免非原子操作丢 Key
 			const oldProfile = config.loadProfiles().find(p => p.id === id);
-			if (oldProfile && oldProfile.kind !== kind) {
-				await config.updateServiceKind(id, kind);
+			if (oldProfile) {
+				if (oldProfile.kind !== kind) {
+					await config.updateServiceKind(id, kind);
+				}
+				// 数据来源切换时清理旧 key
+				if (oldProfile.dataSource !== dataSource) {
+					await config.updateServiceKey(id, '');
+				}
 			}
 			// 更新数据来源模式
 			await config.updateServiceDataSource(id, dataSource);
@@ -321,7 +340,12 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 		vscode.commands.registerCommand('aiQuotaDashboard.addService', async (data: unknown) => {
 			if (!data || typeof data !== 'object') { return; }
 			const d = data as AddServicePayload;
-			const defaultKind = getAllDescriptors()[0]?.kind ?? 'glm';
+			const descriptors = getAllDescriptors();
+			if (descriptors.length === 0) {
+				vscode.window.showErrorMessage('没有可用的服务类型');
+				return;
+			}
+			const defaultKind = descriptors[0]?.kind ?? 'glm';
 			const kind = isValidServiceId(d.kind) ? d.kind : defaultKind;
 			const name = getDescriptor(kind).defaultName;
 			await config.addService(kind, name);
@@ -469,10 +493,17 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
 	// 定义轮询函数（供命令和轮询共用）
 	const loop = async () => {
+		if (isLoopRunning) {
+			log('上轮轮询尚未完成，跳过本次');
+			return;
+		}
+		isLoopRunning = true;
 		try {
 			await pullAll(bar, ctx);
 		} catch (err) {
 			logError('轮询异常', err);
+		} finally {
+			isLoopRunning = false;
 		}
 	};
 
@@ -494,12 +525,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
 	await startPolling(loop);
 }
 
-export function deactivate() {
+export async function deactivate(): Promise<void> {
 	if (timer) {
 		clearInterval(timer);
 		timer = undefined;
 	}
 	cache.dispose();
-	bridge?.dispose();
+	await bridge?.dispose();
 	outputChannel.dispose();
 }

@@ -10,11 +10,13 @@ vscode/.vscode-test/
 vscode/coverage/
 vscode/.eslintcache
 
-# === Browser Extension ===
-# (浏览器扩展是纯 JS，无 node_modules，但保留以备将来引入构建工具)
-browser/node_modules/
-browser/dist/
-browser/**/*.map
+# === Browser Extensions ===
+chrome/node_modules/
+chrome/dist/
+chrome/**/*.map
+firefox/node_modules/
+firefox/dist/
+firefox/**/*.map
 
 # === Package Artifacts ===
 *.vsix

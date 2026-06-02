@@ -151,14 +151,14 @@ jobs:
       - name: Package Chrome extension
         run: |
           VERSION="${{ needs.vscode.outputs.version }}"
-          cd browser/chrome
-          zip -r ../../ai-quota-cookie-bridge-chrome-v${VERSION}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
+          cd chrome
+          zip -r ../ai-quota-cookie-bridge-chrome-v${VERSION}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
 
       - name: Package Firefox extension
         run: |
           VERSION="${{ needs.vscode.outputs.version }}"
-          cd browser/firefox
-          zip -r ../../ai-quota-cookie-bridge-firefox-v${VERSION}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
+          cd firefox
+          zip -r ../ai-quota-cookie-bridge-firefox-v${VERSION}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
 
       - name: Upload Chrome artifact
         uses: actions/upload-artifact@v4

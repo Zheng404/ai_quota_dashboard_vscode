@@ -49,8 +49,12 @@ let lastRelayTime = 0;
 /** 待重试的 payload 队列 */
 const pendingPayloads = [];
 let isRetrying = false;
+const MAX_PENDING = 50;
 
 function enqueuePayload(payload) {
+  if (pendingPayloads.length >= MAX_PENDING) {
+    pendingPayloads.shift(); // FIFO eviction
+  }
   pendingPayloads.push({ payload, retries: 0 });
 }
 
@@ -93,7 +97,7 @@ async function withBridgeMutex(fn) {
   let release;
   const promise = new Promise(resolve => { release = resolve; });
   const prev = _mutexPromise;
-  _mutexPromise = prev.then(() => promise);
+  _mutexPromise = prev.then(() => promise, () => promise);
   await prev;
   try {
     return await fn();
@@ -104,6 +108,15 @@ async function withBridgeMutex(fn) {
 
 // ===== VSCode Bridge 通信 =====
 
+const timeoutSignal = (ms) => {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return AbortSignal.timeout(ms);
+  }
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), ms);
+  return ctrl.signal;
+};
+
 /** 内部：实际端口发现逻辑（调用方需已持有互斥锁） */
 async function _doDiscoverPort() {
   // 若已连接则直接返回
@@ -112,7 +125,7 @@ async function _doDiscoverPort() {
   for (const port of BRIDGE.ports) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`, {
-        signal: AbortSignal.timeout(1000),
+        signal: timeoutSignal(1000),
       });
       if (res.ok) {
         const data = await res.json();
@@ -162,7 +175,7 @@ async function sendToVscode(payload) {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(5000),
+        signal: timeoutSignal(5000),
       });
 
       if (res.ok) {
@@ -314,7 +327,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // 来自 popup / dashboard 的手动触发
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'relayNow') {
-    relayCookies(true).then(() => sendResponse({ success: true }));
+    relayCookies(true)
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
   if (msg.action === 'getStatus') {

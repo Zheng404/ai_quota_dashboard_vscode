@@ -236,8 +236,8 @@ export class StatusBar {
 			const pct = q.percent.toFixed(0);
 			md.appendMarkdown(`**${q.label}** **${pct}%** 已使用\n\n`);
 
-			const filled = Math.round((q.percent / 100) * 20);
-			const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+		const filled = Number.isFinite(q.percent) ? Math.max(0, Math.min(20, Math.round((q.percent / 100) * 20))) : 0;
+		const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
 			md.appendMarkdown(`${bar}\n\n`);
 
 			if (q.used != null && q.limit != null) {

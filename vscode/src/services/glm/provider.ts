@@ -106,8 +106,12 @@ interface SubscriptionResponse {
 
 /** 从 URL 提取域名 */
 export function extractDomain(url: string): string {
-	const u = new URL(url);
-	return `${u.protocol}//${u.host}`;
+	try {
+		const u = new URL(url);
+		return `${u.protocol}//${u.host}`;
+	} catch {
+		return GLM_DEFAULT_ENDPOINT;
+	}
 }
 
 function formatDateTime(d: Date): string {

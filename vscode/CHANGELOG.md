@@ -2,6 +2,62 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-06-02
+
+### 新增 (Added)
+
+- **浏览器扩展（Cookie Bridge）**
+  - Chrome/Edge 和 Firefox 双平台支持（Manifest V3）
+  - 自动监控 `kimi.com` (`kimi-auth`) 和 `xiaomimimo.com` Cookie 变化
+  - 通过本地 HTTP 服务器安全推送至 VSCode（动态 Token 认证）
+  - 独立 Dashboard 页面：查看 Kimi/MiMo 配额状态、VSCode 连接状态
+  - 弹窗面板：显示 Cookie 登录状态、手动触发同步
+  - 快捷键支持：`Alt+Q` 打开弹窗，`Alt+Shift+Q` 打开 Dashboard
+  - 防抖推送（1.5s 延迟）+ 失败重试队列（最多 3 次）
+  - 请求体大小限制（1MB），防止 DoS
+- **双模式认证**
+  - `manual`：手动输入 Token（API Key / JWT / Cookie）
+  - `bridge`：浏览器扩展自动同步（无需手动复制粘贴）
+- **LRU 内存缓存** — 限制最大 100 条目，防止无界增长
+- **AsyncQueue 并发控制** — Promise-based 串行队列，消除 pullAll/pullService/afterConfigChange 竞态条件
+
+### 安全 (Security)
+
+- **XSS 防护**：浏览器扩展所有页面（Dashboard、Popup）全部使用 `createElement`/`textContent` 替代 `innerHTML`
+- **Content Security Policy**：为所有 HTML 页面添加 CSP 策略
+- **敏感字段过滤**：Cookie 推送时移除 `httpOnly`/`secure`/`expirationDate`，仅发送必要字段
+- **PID 后缀端口文件**：避免多 VSCode 实例同时启动时的端口文件冲突
+- **请求超时**：Bridge 服务器 POST 请求增加 5s 超时
+- **Mutex 保护**：Promise-based mutex 保护 BRIDGE 状态，防止并发竞态
+
+### 改进 (Changed)
+
+- **项目重组**：
+  - `vscode/`：VSCode 扩展源码和构建产物
+  - `chrome/`：Chrome/Edge 浏览器扩展
+  - `firefox/`：Firefox 浏览器扩展
+  - `build.sh`：一键打包三个平台的扩展
+- **ConfigManager 类封装**：消除模块级可变状态 `let ctx`，增加 `displayName`/`pollInterval`/`warnThreshold`/`afkThreshold` 输入校验
+- **fetch.ts 重试机制**：指数退避（`retryDelay * 2^attempt`），网络错误和服务端 5xx 自动重试
+- **fetch.ts 请求日志**：集成 VSCode OutputChannel，记录请求/响应状态码和耗时
+- **AFK Detector dispose**：符合扩展生命周期规范，销毁后调用无效果
+- **WebviewView dispose**：消息监听器正确清理，防止内存泄漏
+- **persistence.ts UTC 日期**：历史数据去重改用 UTC 日期，消除时区偏移问题
+- **registry.ts 显式初始化**：`createRegistry()` 工厂函数，重复注册时 `console.warn` 而非 `throw`
+- **GLM 帮助提示**：补充 `helpCommand` + `helpMessage`，引导用户获取 Bearer Token
+- **MiMo resetsAt**：从 `currentPeriodEnd` 解析倒计时，状态栏统一显示
+
+### 修复 (Fixed)
+
+- **Provider 错误处理**：统一不静默吞错，增加 `console.warn` 日志
+- **Kimi NaN 防御**：`parseInt` 失败时回退到 0，避免 `NaN` 污染百分比计算
+- **Kimi 错误码**：`subData.code` 检查增加 `'ok'` 白名单，避免误判成功响应
+- **MiMo 数据校验**：`code === 0` 后检查 `data` 存在性，空数据时抛出明确错误
+- **MiMo 401 分支**：增加 `Unauthorized` 字符串检测，覆盖更多鉴权失败场景
+- **GLM 日期解析**：`new Date(t).getTime()` 返回 `NaN` 时跳过该数据点
+- **GLM 订阅解析**：`nextRenewTime` 无效时返回 `undefined` 而非无效日期
+- **afterConfigChange 死锁**：提取 `doPullAll` 内部逻辑，避免 `enqueue` 嵌套调用
+
 ## [0.2.5] - 2026-05-27
 
 ### 变更 (Changed)
@@ -72,6 +128,7 @@
 - Webview JS 为字符串拼接，无类型检查
 - `warnThreshold` 配置声明但未实际触发警告通知
 
+[0.3.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.3.0
 [0.2.5]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.2.5
 [0.2.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.1.0

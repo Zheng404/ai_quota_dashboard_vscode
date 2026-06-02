@@ -72,7 +72,12 @@ const ITEM_LABEL_MAP: Record<string, string> = {
 
 /** 解析单个配额项为 QuotaSlot */
 export function parseItem(item: MimoUsageItem): QuotaSlot | undefined {
-	if (!item || item.limit <= 0) return undefined;
+	if (!item || typeof item.limit !== 'number' || !isFinite(item.limit) || item.limit <= 0) {
+		return undefined;
+	}
+	if (typeof item.used !== 'number' || !isFinite(item.used)) {
+		return undefined;
+	}
 
 	// 优先用 used/limit 自行计算百分比，避免 API 返回的 percent 字段格式歧义
 	const percent = Math.min((item.used / item.limit) * 100, 100);

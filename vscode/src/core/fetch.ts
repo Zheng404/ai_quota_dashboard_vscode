@@ -63,7 +63,14 @@ function doRequest<T>(options: HttpRequestOptions): Promise<T> {
 			(res) => {
 				const chunks: Buffer[] = [];
 				res.on('error', (err) => reject(createHttpError(err.message, res.statusCode ?? undefined, options.url)));
-				res.on('data', (chunk) => { chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); });
+				res.on('data', (chunk) => {
+					if (Buffer.isBuffer(chunk) || typeof chunk === 'string') {
+						chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf-8'));
+					} else if (chunk instanceof Uint8Array) {
+						chunks.push(Buffer.from(chunk));
+					}
+					// Ignore other types to avoid silent data corruption
+				});
 				res.on('end', () => {
 					const body = Buffer.concat(chunks).toString('utf-8');
 					const contentType = res.headers['content-type'] ?? '';

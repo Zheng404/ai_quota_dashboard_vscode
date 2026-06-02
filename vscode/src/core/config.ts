@@ -27,7 +27,7 @@ export class ConfigManager {
 	private getState<T>(key: string, defaultValue: T): T {
 		if (!this.ctx) return defaultValue;
 		const val = this.ctx.globalState.get<T | undefined>(key, undefined);
-		if (val !== undefined) { return val; }
+		if (val !== undefined && val !== null) { return val; }
 		const cfg = vscode.workspace.getConfiguration('aiQuotaDashboard');
 		return cfg.get<T>(key, defaultValue);
 	}
@@ -99,10 +99,12 @@ export class ConfigManager {
 	}
 
 	/** 添加服务实例 */
+	private nextId = 0;
+
 	async addService(kind: ServiceId, displayName: string): Promise<string> {
 		this.validateDisplayName(displayName);
 		const profiles = this.loadProfiles();
-		const id = `${kind}-${Date.now()}`;
+		const id = `${kind}-${Date.now()}-${this.nextId++}`;
 		profiles.push({ id, kind, displayName: displayName.trim(), dataSource: 'manual' });
 		await this.saveProfiles(profiles);
 		return id;

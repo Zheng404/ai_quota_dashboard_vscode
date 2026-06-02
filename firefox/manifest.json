@@ -3,7 +3,7 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "ai-quota-dashboard@zheng404.github.io",
-      "strict_min_version": "109.0"
+      "strict_min_version": "116.0"
     }
   },
   "name": "AI Quota Cookie Bridge",

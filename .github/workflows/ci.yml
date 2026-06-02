@@ -96,21 +96,21 @@ jobs:
 
       - name: Validate Chrome manifest
         run: |
-          python3 -c "import json; json.load(open('browser/chrome/manifest.json')); print('Chrome manifest valid')"
+          python3 -c "import json; json.load(open('chrome/manifest.json')); print('Chrome manifest valid')"
 
       - name: Validate Firefox manifest
         run: |
-          python3 -c "import json; json.load(open('browser/firefox/manifest.json')); print('Firefox manifest valid')"
+          python3 -c "import json; json.load(open('firefox/manifest.json')); print('Firefox manifest valid')"
 
       - name: Package Chrome extension
         run: |
-          cd browser/chrome
-          zip -r ../../ai-quota-cookie-bridge-chrome-${{ github.sha }}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
+          cd chrome
+          zip -r ../ai-quota-cookie-bridge-chrome-${{ github.sha }}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
 
       - name: Package Firefox extension
         run: |
-          cd browser/firefox
-          zip -r ../../ai-quota-cookie-bridge-firefox-${{ github.sha }}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
+          cd firefox
+          zip -r ../ai-quota-cookie-bridge-firefox-${{ github.sha }}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
 
       - name: Upload Chrome artifact
         uses: actions/upload-artifact@v4

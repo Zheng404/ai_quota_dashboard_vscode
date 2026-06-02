@@ -68,23 +68,26 @@ export class CookieBridgeServer {
 					// 首选端口被占用，尝试随机端口
 					this.log(`端口 ${preferredPort} 被占用，使用随机端口`);
 					this.server = http.createServer((req, res) => this.handleRequest(req, res));
-					this.server.listen(0, '127.0.0.1', () => {
-						this.onListening(resolve);
-					});
+			this.server.listen(0, '127.0.0.1', () => {
+					this.onListening(resolve, reject);
+				});
 				} else {
 					reject(err);
 				}
 			});
 
-			this.server.listen(preferredPort ?? 0, '127.0.0.1', () => {
-				this.onListening(resolve);
-			});
+		this.server.listen(preferredPort ?? 0, '127.0.0.1', () => {
+			this.onListening(resolve, reject);
+		});
 		});
 	}
 
-	private onListening(resolve: (port: number) => void): void {
+	private onListening(resolve: (port: number) => void, reject: (err: Error) => void): void {
 		const addr = this.server?.address() as { port: number } | null;
-		if (!addr) { return; }
+		if (!addr) {
+			reject(new Error('Server address is null after listening'));
+			return;
+		}
 		this.port = addr.port;
 
 		// 写入端口文件供浏览器扩展发现（带 PID 后缀避免多实例冲突）
@@ -116,14 +119,18 @@ export class CookieBridgeServer {
 		}
 
 		// 健康检查（无需认证，返回 authToken 供浏览器扩展使用）
+		// SECURITY NOTE: 此处返回 authToken 是一个已知限制。浏览器扩展需要通过 /health
+		// 获取 authToken 才能访问后续受保护端点。由于通信仅限本地 (127.0.0.1)，
+		// 这种暴露是可接受的。若未来协议变更，应通过其他安全机制传递 token。
 		if (req.url === '/health' && req.method === 'GET') {
 			res.writeHead(200, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ status: 'ok', authToken: this.authToken }));
+			res.end(JSON.stringify({ status: 'ok', port: this.port, authToken: this.authToken }));
 			return;
 		}
 
 		// 认证检查
-		const token = req.headers['x-auth-token'];
+		const rawToken = req.headers['x-auth-token'];
+		const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
 		if (token !== this.authToken) {
 			res.writeHead(401, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ error: 'Unauthorized' }));
@@ -132,20 +139,31 @@ export class CookieBridgeServer {
 
 		// Cookie 接收端点
 		if (req.url === '/cookies' && req.method === 'POST') {
-			let body = '';
+			const chunks: Buffer[] = [];
 			let bodySize = 0;
+			let destroyed = false;
 			req.on('data', (chunk: Buffer) => {
 				bodySize += chunk.length;
 				if (bodySize > MAX_BODY_SIZE) {
-					req.destroy();
 					res.writeHead(413, { 'Content-Type': 'application/json' });
 					res.end(JSON.stringify({ error: 'Request body too large' }));
+					req.destroy();
+					destroyed = true;
 					return;
 				}
-				body += chunk;
+				chunks.push(chunk);
+			});
+			req.on('error', (err) => {
+				this.log(`请求错误: ${err.message}`);
+				if (!destroyed && !res.writableEnded) {
+					res.writeHead(400, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify({ error: 'Bad request' }));
+				}
 			});
 			req.on('end', () => {
+				if (destroyed) { return; }
 				try {
+					const body = Buffer.concat(chunks).toString('utf-8');
 					const payload: CookiePayload = JSON.parse(body);
 
 					if (payload.cookies && payload.cookies.length > 0) {
@@ -170,10 +188,18 @@ export class CookieBridgeServer {
 
 	getPort(): number { return this.port; }
 
-	dispose(): void {
+	async dispose(): Promise<void> {
 		if (this.server) {
-			this.server.close();
+			const server = this.server;
 			this.server = null;
+			await new Promise<void>((resolve) => {
+				server.close((err) => {
+					if (err) {
+						this.log(`关闭服务器出错: ${err.message}`);
+					}
+					resolve();
+				});
+			});
 		}
 		try { fs.unlinkSync(this.portFile); } catch { /* ignore */ }
 		this.log('Cookie Bridge 已停止');

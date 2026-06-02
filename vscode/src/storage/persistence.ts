@@ -45,7 +45,7 @@ export async function saveHistory(
 
 		// 添加新的数据点（如果和上一个不同）
 		const last = pts[pts.length - 1];
-		if (!last || last.tokens !== used) {
+		if (!last || last.tokens !== used && !(Number.isNaN(last.tokens) && Number.isNaN(used))) {
 			pts.push({
 				at: now,
 				tokens: used,
