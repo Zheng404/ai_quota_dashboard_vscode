@@ -1,7 +1,7 @@
 /**
  * MiMo API Client (Browser Extension)
- * 
- * 从浏览器 Cookie 读取凭证，调用 MiMo 配额 API。
+ *
+ * 从浏览器 Cookie 读取凭证，调用 MiMo 配额 API，返回与 VSCode 扩展兼容的完整数据。
  */
 
 const MIMO_BASE_URL = 'https://platform.xiaomimimo.com';
@@ -70,12 +70,21 @@ function parseItem(item) {
 }
 
 /**
- * 拉取 MiMo 配额数据
+ * 拉取 MiMo 配额数据（完整格式，与 VSCode 扩展兼容）
  */
 export async function fetchMimoQuota() {
 	const cookie = await getMimoCookieString();
 	if (!cookie) {
-		return { slots: [], planName: '', currentPeriodEnd: '', err: '未找到 MiMo Cookie' };
+		return {
+			id: 'mimo',
+			name: 'MiMo',
+			kind: 'mimo',
+			slots: [],
+			updatedAt: Date.now(),
+			planName: '',
+			currentPeriodEnd: '',
+			err: '未找到 MiMo Cookie，请先登录 MiMo',
+		};
 	}
 
 	try {
@@ -86,7 +95,11 @@ export async function fetchMimoQuota() {
 
 		if (usageRes.code !== 0) {
 			return {
+				id: 'mimo',
+				name: 'MiMo',
+				kind: 'mimo',
 				slots: [],
+				updatedAt: Date.now(),
 				planName: '',
 				currentPeriodEnd: '',
 				err: `MiMo 用量接口错误: ${usageRes.message || usageRes.code}`,
@@ -102,21 +115,33 @@ export async function fetchMimoQuota() {
 			}
 		}
 
+		// 月度总览
+		const monthUsage = usageRes.data?.monthUsage;
+
 		const detail = detailRes.data;
 
 		return {
+			id: 'mimo',
+			name: 'MiMo',
+			kind: 'mimo',
 			slots,
+			updatedAt: Date.now(),
 			planCode: detail?.planCode,
 			planName: detail?.planName,
 			currentPeriodEnd: detail?.currentPeriodEnd,
 			expired: detail?.expired,
 			enableAutoRenew: detail?.enableAutoRenew,
+			monthTotalToken: monthUsage?.items?.find(i => i.name === 'month_total_token')?.value,
 			err: null,
 		};
 
 	} catch (err) {
 		return {
+			id: 'mimo',
+			name: 'MiMo',
+			kind: 'mimo',
 			slots: [],
+			updatedAt: Date.now(),
 			planName: '',
 			currentPeriodEnd: '',
 			err: err.message || '请求失败',

@@ -1,99 +1,90 @@
 /**
- * AI Quota Dashboard — Browser Extension Dashboard
- * 
- * 独立仪表盘：显示 Kimi 和 MiMo 配额数据
+ * AI Quota Dashboard — 浏览器扩展主逻辑
+ *
+ * 支持 GLM / Kimi / MiMo 完整仪表盘功能
  */
 
+import { fetchGlmQuota, fetchGlmDetail } from './api/glm.js';
 import { fetchKimiQuota } from './api/kimi.js';
 import { fetchMimoQuota } from './api/mimo.js';
+import { renderService, switchGlmMainTab, switchGlmSubTab, mergeGlmDetailData, fmtDateTime } from './templates.js';
 
-// ===== 服务配置 =====
-
-const SERVICES = [
-	{ name: 'Kimi Membership', id: 'kimi', fetcher: fetchKimiQuota },
-	{ name: 'Xiaomi MiMo', id: 'mimo', fetcher: fetchMimoQuota },
-];
+// ===== 常量 =====
 
 const CACHE_TTL_MS = 60 * 1000;
-const TIMEOUT_MS = 15000;
+const TIMEOUT_MS = 20000;
+
+const SERVICE_FETCHERS = {
+	glm: fetchGlmQuota,
+	kimi: fetchKimiQuota,
+	mimo: fetchMimoQuota,
+};
+
+const SERVICE_LABELS = {
+	glm: 'GLM Coding Plan',
+	kimi: 'Kimi Membership',
+	mimo: 'Xiaomi MiMo',
+};
 
 // ===== DOM 元素 =====
 
 const servicesEl = document.getElementById('services');
 const refreshBtn = document.getElementById('btn-refresh');
-const vscodeBtn = document.getElementById('btn-vscode');
-const bridgeDot = document.getElementById('bridge-dot');
-const bridgeText = document.getElementById('bridge-text');
+const settingsBtn = document.getElementById('btn-settings');
 const lastUpdateEl = document.getElementById('last-update');
+const tabBtns = document.querySelectorAll('.tab-btn');
+const tabPanels = document.querySelectorAll('.tab-panel');
+const subTabBtns = document.querySelectorAll('.sub-tab-btn');
+const subTabPanels = document.querySelectorAll('.sub-tab-panel');
+const settingsServicesEl = document.getElementById('settings-services');
+const settingsGlobalEl = document.getElementById('settings-global');
 
-// ===== 安全 DOM 辅助函数 =====
+// ===== 状态 =====
 
-function escapeHtml(str) {
-	if (str == null) return '';
-	return String(str)
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;');
-}
+let serviceDataMap = new Map();
+let isLoading = false;
+let config = {
+	services: [
+		{ id: 'kimi', kind: 'kimi', name: 'Kimi', enabled: true },
+		{ id: 'mimo', kind: 'mimo', name: 'MiMo', enabled: true },
+	],
+	glmApiKey: '',
+	settings: {
+		refreshInterval: 600,
+		warnThreshold: 0.8,
+	},
+};
 
-function createElement(tag, attrs = {}, children = []) {
-	const el = document.createElement(tag);
-	for (const [key, value] of Object.entries(attrs)) {
-		if (key === 'textContent') {
-			el.textContent = value;
-		} else if (key === 'innerHTML') {
-			el.innerHTML = value;
-		} else if (key.startsWith('on') && typeof value === 'function') {
-			const event = key.slice(2).toLowerCase();
-			el.addEventListener(event, value);
-		} else {
-			el.setAttribute(key, value);
+// ===== 配置管理 =====
+
+async function loadConfig() {
+	try {
+		const stored = await chrome.storage.local.get(['dashboardConfig', 'glmApiKey']);
+		if (stored.dashboardConfig) {
+			config = { ...config, ...stored.dashboardConfig };
 		}
-	}
-	for (const child of children) {
-		if (child == null) continue;
-		if (typeof child === 'string') {
-			el.appendChild(document.createTextNode(child));
-		} else if (child instanceof Node) {
-			el.appendChild(child);
+		if (stored.glmApiKey) {
+			config.glmApiKey = stored.glmApiKey;
 		}
+		// 确保 GLM 服务项存在
+		const hasGlm = config.services.some(s => s.kind === 'glm');
+		if (!hasGlm && config.glmApiKey) {
+			config.services.push({ id: 'glm', kind: 'glm', name: 'GLM', enabled: true });
+		}
+	} catch (err) {
+		console.error('[Dashboard] 加载配置失败:', err);
 	}
-	return el;
 }
 
-// ===== 工具函数 =====
-
-function fmtNum(n) {
-	if (n == null) return '-';
-	if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
-	if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-	if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-	return String(n);
-}
-
-function fmtDateTime(d) {
-	const pad = (n) => String(n).padStart(2, '0');
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-function getColorClass(pct) {
-	if (pct >= 90) return 'danger';
-	if (pct >= 75) return 'warning';
-	return 'success';
-}
-
-function getCountdown(ts) {
-	if (!ts) return '';
-	const diff = ts - Date.now();
-	if (diff <= 0) return '已重置';
-	const mins = Math.floor(diff / 60000);
-	if (mins < 1) return '<1分钟';
-	const hrs = Math.floor(mins / 60);
-	const rem = mins % 60;
-	if (hrs > 0) return `${hrs}h ${rem}m`;
-	return `${rem}m`;
+async function saveConfig() {
+	try {
+		await chrome.storage.local.set({
+			dashboardConfig: config,
+			glmApiKey: config.glmApiKey,
+		});
+	} catch (err) {
+		console.error('[Dashboard] 保存配置失败:', err);
+	}
 }
 
 // ===== 缓存 =====
@@ -105,7 +96,7 @@ async function getCached(serviceId) {
 		if (!entry) return null;
 		const age = Date.now() - entry.timestamp;
 		if (age > CACHE_TTL_MS) return null;
-		return { data: entry.data, fromCache: true };
+		return entry.data;
 	} catch {
 		return null;
 	}
@@ -117,164 +108,413 @@ async function setCached(serviceId, data) {
 			[`quotaCache_${serviceId}`]: { data, timestamp: Date.now() },
 		});
 	} catch {
-		// ignore cache write errors
+		// ignore
 	}
 }
 
-// ===== 渲染 =====
-
-function renderSlot(slot, container) {
-	const pct = Math.min(slot.percent, 100);
-	const color = getColorClass(pct);
-	const detail = [];
-	if (slot.used != null && slot.limit != null) {
-		detail.push(`${fmtNum(slot.used)} / ${fmtNum(slot.limit)}`);
-	}
-	const countdown = getCountdown(slot.resetsAt);
-	if (countdown) detail.push(countdown);
-
-	const slotEl = createElement('div', { class: 'slot' }, [
-		createElement('div', { class: 'slot-header' }, [
-			createElement('span', { class: 'slot-label', textContent: slot.label }),
-			createElement('span', { class: `slot-percent ${color}`, textContent: `${pct.toFixed(0)}%` }),
-		]),
-		createElement('div', { class: 'progress-bar' }, [
-			createElement('div', { class: `progress-fill ${color}`, style: `width:${pct}%` }),
-		]),
-		createElement('div', { class: 'slot-detail', textContent: detail.join(' · ') }),
-	]);
-
-	container.appendChild(slotEl);
-}
-
-function renderServiceCard(serviceName, data, container) {
-	if (data.err) {
-		const card = createElement('div', { class: 'service-card error-card' }, [
-			createElement('div', { class: 'service-name', textContent: `⚠️ ${serviceName}` }),
-			createElement('p', { textContent: data.err }),
-			createElement('button', {
-				class: 'btn btn-primary',
-				textContent: '重试',
-				onclick: () => location.reload(),
-			}),
-		]);
-		container.appendChild(card);
-		return;
-	}
-
-	const badge = data.level || data.planName || '';
-	const time = data.currentEndTime || '';
-	const fromCache = data._fromCache;
-
-	const children = [];
-
-	// Header
-	const headerChildren = [
-		createElement('div', { class: 'service-name' }, [
-			document.createTextNode(serviceName),
-			...(badge ? [createElement('span', { class: 'service-badge', textContent: badge })] : []),
-		]),
-	];
-	if (time) {
-		headerChildren.push(createElement('span', { class: 'service-time', textContent: `有效期至 ${time}` }));
-	}
-	if (fromCache) {
-		headerChildren.push(createElement('span', { class: 'cache-badge', textContent: '(缓存)' }));
-	}
-	children.push(createElement('div', { class: 'service-header' }, headerChildren));
-
-	// Slots
-	if (Array.isArray(data.slots)) {
-		const slotsContainer = createElement('div');
-		for (const slot of data.slots) {
-			renderSlot(slot, slotsContainer);
-		}
-		children.push(slotsContainer);
-	}
-
-	const card = createElement('div', { class: 'service-card' }, children);
-	container.appendChild(card);
-}
-
-// ===== 超时包装 =====
+// ===== 数据加载 =====
 
 function withTimeout(promise, ms) {
 	return Promise.race([
 		promise,
-		new Promise((_, reject) =>
+		new Promise((_, reject) =
 			setTimeout(() => reject(new Error('请求超时')), ms)
 		),
 	]);
 }
 
-// ===== 数据加载 =====
+async function loadService(serviceConfig, force = false) {
+	const { kind, id } = serviceConfig;
+	const fetcher = SERVICE_FETCHERS[kind];
+	if (!fetcher) {
+		return {
+			id,
+			name: SERVICE_LABELS[kind] || kind,
+			kind,
+			slots: [],
+			updatedAt: Date.now(),
+			err: `未知的服务类型: ${kind}`,
+		};
+	}
 
-async function loadAll() {
-	refreshBtn.disabled = true;
-	refreshBtn.textContent = '';
-	refreshBtn.appendChild(createElement('span', { class: 'spin', textContent: '🔄' }));
-	refreshBtn.appendChild(document.createTextNode(' 刷新中...'));
+	if (!force) {
+		const cached = await getCached(id);
+		if (cached) return cached;
+	}
 
-	servicesEl.textContent = '';
-	servicesEl.appendChild(createElement('div', { class: 'empty-state' }, [
-		createElement('p', { textContent: '加载中...' }),
-	]));
-
-	const fetchTasks = SERVICES.map(async (svc) => {
-		const cached = await getCached(svc.id);
-		if (cached) {
-			return { service: svc, data: { ...cached.data, _fromCache: true } };
-		}
-		const data = await svc.fetcher();
-		await setCached(svc.id, data);
-		return { service: svc, data };
-	});
-
-	let results;
 	try {
-		results = await withTimeout(Promise.all(fetchTasks), TIMEOUT_MS);
-	} catch (e) {
-		results = [];
-		for (const svc of SERVICES) {
-			results.push({ service: svc, data: { err: e.message || '加载失败' } });
-		}
+		const data = await withTimeout(fetcher(), TIMEOUT_MS);
+		await setCached(id, data);
+		return data;
+	} catch (err) {
+		return {
+			id,
+			name: SERVICE_LABELS[kind] || kind,
+			kind,
+			slots: [],
+			updatedAt: Date.now(),
+			err: err.message || '加载失败',
+		};
+	}
+}
+
+async function loadAll(force = false) {
+	if (isLoading) return;
+	isLoading = true;
+
+	refreshBtn.disabled = true;
+	refreshBtn.innerHTML = '<span class="spin">🔄</span> 刷新中...';
+
+	// 保存 GLM API Key 到 storage（让 api/glm.js 能读取）
+	if (config.glmApiKey) {
+		try {
+			await chrome.storage.local.set({ glmApiKey: config.glmApiKey });
+		} catch { /* ignore */ }
 	}
 
-	servicesEl.textContent = '';
-	for (const { service, data } of results) {
-		renderServiceCard(service.name, data, servicesEl);
+	const enabledServices = config.services.filter(s => s.enabled);
+
+	if (enabledServices.length === 0) {
+		servicesEl.innerHTML = `
+			<div class="empty-state">
+				<div class="empty-icon">📊</div>
+				<p class="empty-title">暂无服务</p>
+				<p class="empty-hint">切换到「设置」标签启用或添加服务</p>
+			</div>`;
+		refreshBtn.disabled = false;
+		refreshBtn.innerHTML = '🔄 刷新';
+		isLoading = false;
+		return;
 	}
 
+	if (force || serviceDataMap.size === 0) {
+		servicesEl.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+	}
+
+	const tasks = enabledServices.map(svc => loadService(svc, force));
+	const results = await Promise.all(tasks);
+
+	serviceDataMap = new Map();
+	for (const data of results) {
+		serviceDataMap.set(data.id, data);
+	}
+
+	renderDashboard();
 	lastUpdateEl.textContent = `更新于 ${fmtDateTime(new Date())}`;
 
 	refreshBtn.disabled = false;
-	refreshBtn.textContent = '🔄 刷新';
+	refreshBtn.innerHTML = '🔄 刷新';
+	isLoading = false;
 }
 
-// ===== VSCode 连接状态 =====
+async function refreshSingleService(serviceId) {
+	const svcConfig = config.services.find(s => s.id === serviceId);
+	if (!svcConfig) return;
 
-async function updateBridgeStatus() {
-	chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
-		if (chrome.runtime.lastError || !response?.connected) {
-			bridgeDot.className = 'bridge-dot disconnected';
-			bridgeText.textContent = 'VSCode 未连接';
-		} else {
-			bridgeDot.className = 'bridge-dot connected';
-			bridgeText.textContent = `VSCode 已连接 (port ${response.port})`;
+	// 找到对应卡片并显示加载状态
+	const card = document.getElementById(`${svcConfig.kind}-card-${serviceId}`);
+	if (card) {
+		const btn = card.querySelector('.btn-refresh-svc');
+		if (btn) btn.innerHTML = '<span class="spin"><svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M883.875 684.806c41.592-90.131 47.607-188.11 23.715-277.077-27.468-102.682-95.063-194.238-193.08-249.865l43.48-93.961-247.21 64.819 110.564 230.424 45.491-98.308c66.606 40.672 112.204 104.396 131.498 176.146 17.257 64.639 13.024 134.926-17.145 200.514-38.445 83.352-110.309 140.105-192.603 162.245a296.78 296.78 0 0 1-36.221 7.297l51.033 105.49c4.853-1.129 9.665-2.263 14.447-3.572 113.302-30.203 213.143-109.249 266.031-224.152z m-524.696 82.476c-67.595-40.598-113.886-104.87-133.367-177.273-17.252-64.64-12.985-134.967 17.145-200.48 38.447-83.386 110.31-140.141 192.605-162.28 13.646-3.651 27.541-6.275 41.587-7.957l-50.886-106.037c-6.676 1.426-13.353 2.956-19.957 4.744-113.266 30.272-213.141 109.317-266.07 224.221-41.511 90.097-47.533 188.11-23.639 277.038l0.073 0.293c27.686 103.375 96.083 195.406 195.196 250.886l-41.111 89.661 246.955-65.694-111.329-230.022-47.202 102.9z m0 0" fill="currentColor"/></svg></span>';
+	}
+
+	const data = await loadService(svcConfig, true);
+	serviceDataMap.set(data.id, data);
+	renderDashboard();
+}
+
+// ===== 渲染 =====
+
+function renderDashboard() {
+	const enabledServices = config.services.filter(s => s.enabled);
+	if (enabledServices.length === 0) {
+		servicesEl.innerHTML = `
+			<div class="empty-state">
+				<div class="empty-icon">📊</div>
+				<p class="empty-title">暂无服务</p>
+				<p class="empty-hint">切换到「设置」标签启用或添加服务</p>
+			</div>`;
+		return;
+	}
+
+	let html = '';
+	for (const svc of enabledServices) {
+		const data = serviceDataMap.get(svc.id);
+		if (data) {
+			html += renderService(data);
 		}
-	});
+	}
+
+	if (!html) {
+		html = '<div class="empty-state"><p>加载中...</p></div>';
+	}
+
+	servicesEl.innerHTML = html;
 }
 
-// ===== 事件 =====
+function renderSettings() {
+	renderSettingsServices();
+	renderSettingsGlobal();
+}
 
-refreshBtn.addEventListener('click', loadAll);
+function renderSettingsServices() {
+	let html = '<div class="settings-section"><h3>服务管理</h3>';
 
-vscodeBtn.addEventListener('click', () => {
-	// 尝试打开 VSCode URI（需要 VSCode URL handler 注册）
-	window.open('vscode://extension/ai-quota-dashboard', '_blank');
+	for (const svc of config.services) {
+		const isGlm = svc.kind === 'glm';
+		html += `
+			<div class="service-item-card" data-service-id="${svc.id}">
+				<div class="svc-row">
+					<span class="svc-name">${escapeHtml(svc.name)}</span>
+					<span class="svc-kind">${escapeHtml(SERVICE_LABELS[svc.kind] || svc.kind)}</span>
+				</div>
+				${isGlm ? `
+				<div class="form-group">
+					<label class="form-label">API Key</label>
+					<input type="password" class="form-input glm-key-input" data-service-id="${svc.id}" value="${escapeHtml(config.glmApiKey || '')}" placeholder="输入 GLM API Key">
+				</div>
+				` : `
+				<div class="form-group">
+					<label class="form-label">状态</label>
+					<p class="form-hint">从浏览器 Cookie 自动获取凭证</p>
+				</div>
+				`}
+				<div class="svc-actions">
+					<button class="btn btn-sm btn-primary save-svc-btn" data-service-id="${svc.id}">保存</button>
+					${isGlm ? `<button class="btn btn-sm btn-danger remove-svc-btn" data-service-id="${svc.id}">删除</button>
+					` : ''}
+				</div>
+			</div>`;
+	}
+
+	// 添加 GLM 按钮（如果没有 GLM 服务）
+	const hasGlm = config.services.some(s => s.kind === 'glm');
+	if (!hasGlm) {
+		html += `
+			<div class="form-actions">
+				<button class="btn btn-primary" id="add-glm-btn">+ 添加 GLM 服务</button>
+			</div>`;
+	}
+
+	html += '</div>';
+	settingsServicesEl.innerHTML = html;
+
+	// 绑定服务卡片事件
+	settingsServicesEl.querySelectorAll('.save-svc-btn').forEach(btn => {
+		btn.addEventListener('click', handleSaveService);
+	});
+	settingsServicesEl.querySelectorAll('.remove-svc-btn').forEach(btn => {
+		btn.addEventListener('click', handleRemoveService);
+	});
+	const addGlmBtn = document.getElementById('add-glm-btn');
+	if (addGlmBtn) {
+		addGlmBtn.addEventListener('click', handleAddGlm);
+	}
+}
+
+function renderSettingsGlobal() {
+	settingsGlobalEl.innerHTML = `
+		<div class="settings-section">
+			<h3>全局设置</h3>
+			<div class="form-group">
+				<label class="form-label">自动刷新间隔（秒）</label>
+				<input type="number" class="form-input" id="setting-refresh" value="${config.settings.refreshInterval}" min="0" step="60">
+				<span class="form-hint">设为 0 禁用自动刷新</span>
+			</div>
+			<div class="form-group">
+				<label class="form-label">预警阈值（0-1）</label>
+				<input type="number" class="form-input" id="setting-warn" value="${config.settings.warnThreshold}" min="0" max="1" step="0.1">
+				<span class="form-hint">配额使用率超过此值时显示警告</span>
+			</div>
+			<div class="form-actions">
+				<button class="btn btn-primary" id="save-global-btn">保存设置</button>
+			</div>
+		</div>
+		<div class="settings-section">
+			<h3>数据管理</h3>
+			<button class="btn btn-danger" id="clear-cache-btn">清除缓存</button>
+		</div>
+	`;
+
+	document.getElementById('save-global-btn').addEventListener('click', handleSaveGlobal);
+	document.getElementById('clear-cache-btn').addEventListener('click', handleClearCache);
+}
+
+function escapeHtml(text) {
+	return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ===== 事件处理 =====
+
+function handleTabSwitch(e) {
+	const tab = e.target.dataset.tab;
+	if (!tab) return;
+
+	currentTab = tab;
+	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === `panel-${tab}`));
+
+	if (tab === 'settings') {
+		renderSettings();
+	}
+}
+
+function handleSubTabSwitch(e) {
+	const subtab = e.target.dataset.subtab;
+	if (!subtab) return;
+
+	currentSubTab = subtab;
+	subTabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.subtab === subtab));
+	subTabPanels.forEach(panel => panel.classList.toggle('active', panel.id === `subpanel-${subtab}`));
+}
+
+async function handleGlmMainTabClick(e) {
+	if (!e.target.classList.contains('glm-main-tab')) return;
+	const svcId = e.target.dataset.svcId;
+	const tab = e.target.dataset.tab;
+	if (svcId && tab) {
+		switchGlmMainTab(svcId, tab);
+	}
+}
+
+async function handleGlmSubTabClick(e) {
+	if (!e.target.classList.contains('glm-sub-tab')) return;
+	const svcId = e.target.dataset.svcId;
+	const range = e.target.dataset.range;
+	if (svcId && range) {
+		switchGlmSubTab(svcId, range, async (id, rng) => {
+			// 懒加载详情数据
+			const detail = await fetchGlmDetail(rng);
+			if (detail) {
+				mergeGlmDetailData(id, detail);
+			}
+		});
+	}
+}
+
+async function handleRefreshService(e) {
+	const btn = e.target.closest('.btn-refresh-svc');
+	if (!btn) return;
+	const serviceId = btn.dataset.serviceId;
+	if (serviceId) {
+		await refreshSingleService(serviceId);
+	}
+}
+
+async function handleSaveService(e) {
+	const btn = e.target;
+	const serviceId = btn.dataset.serviceId;
+	const card = btn.closest('.service-item-card');
+	const svc = config.services.find(s => s.id === serviceId);
+	if (!svc) return;
+
+	if (svc.kind === 'glm') {
+		const keyInput = card.querySelector('.glm-key-input');
+		if (keyInput) {
+			config.glmApiKey = keyInput.value.trim();
+			// 同步到 storage，让 api/glm.js 立即生效
+			await chrome.storage.local.set({ glmApiKey: config.glmApiKey });
+		}
+	}
+
+	await saveConfig();
+	btn.textContent = '已保存';
+	setTimeout(() => btn.textContent = '保存', 1500);
+
+	// 如果保存的是 GLM 且有 API Key，尝试刷新
+	if (svc.kind === 'glm' && config.glmApiKey) {
+		await refreshSingleService(serviceId);
+	}
+}
+
+async function handleRemoveService(e) {
+	const btn = e.target;
+	const serviceId = btn.dataset.serviceId;
+	if (!confirm('确定要删除此服务吗？')) return;
+
+	config.services = config.services.filter(s => s.id !== serviceId);
+	if (serviceId === 'glm') {
+		config.glmApiKey = '';
+		await chrome.storage.local.remove('glmApiKey');
+	}
+	await saveConfig();
+	serviceDataMap.delete(serviceId);
+	renderSettingsServices();
+	renderDashboard();
+}
+
+async function handleAddGlm() {
+	const hasGlm = config.services.some(s => s.kind === 'glm');
+	if (hasGlm) return;
+
+	config.services.push({
+		id: 'glm',
+		kind: 'glm',
+		name: 'GLM',
+		enabled: true,
+	});
+	await saveConfig();
+	renderSettingsServices();
+}
+
+async function handleSaveGlobal() {
+	const refreshInput = document.getElementById('setting-refresh');
+	const warnInput = document.getElementById('setting-warn');
+
+	config.settings.refreshInterval = parseInt(refreshInput.value, 10) || 600;
+	config.settings.warnThreshold = parseFloat(warnInput.value) || 0.8;
+
+	await saveConfig();
+	const btn = document.getElementById('save-global-btn');
+	btn.textContent = '已保存';
+	setTimeout(() => btn.textContent = '保存设置', 1500);
+}
+
+async function handleClearCache() {
+	try {
+		const keys = await chrome.storage.local.get(null);
+		const cacheKeys = Object.keys(keys).filter(k => k.startsWith('quotaCache_'));
+		if (cacheKeys.length > 0) {
+			await chrome.storage.local.remove(cacheKeys);
+		}
+		serviceDataMap.clear();
+		alert('缓存已清除');
+		renderDashboard();
+	} catch (err) {
+		alert('清除失败: ' + err.message);
+	}
+}
+
+// ===== 事件委托 =====
+
+servicesEl.addEventListener('click', (e) => {
+	handleGlmMainTabClick(e);
+	handleGlmSubTabClick(e);
+	handleRefreshService(e);
+});
+
+tabBtns.forEach(btn => btn.addEventListener('click', handleTabSwitch));
+subTabBtns.forEach(btn => btn.addEventListener('click', handleSubTabSwitch));
+refreshBtn.addEventListener('click', () => loadAll(true));
+settingsBtn.addEventListener('click', () => {
+	currentTab = 'settings';
+	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'settings'));
+	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === 'panel-settings'));
+	renderSettings();
 });
 
 // ===== 初始化 =====
 
-loadAll();
-updateBridgeStatus();
+async function init() {
+	await loadConfig();
+	await loadAll();
+
+	// 自动刷新
+	setInterval(() => {
+		if (config.settings.refreshInterval > 0 && currentTab === 'dashboard') {
+			loadAll();
+		}
+	}, config.settings.refreshInterval * 1000);
+}
+
+init();

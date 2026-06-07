@@ -1,7 +1,7 @@
 /**
  * Kimi API Client (Browser Extension)
- * 
- * 从浏览器 Cookie 读取凭证，调用 Kimi 配额 API，返回标准化数据。
+ *
+ * 从浏览器 Cookie 读取凭证，调用 Kimi 配额 API，返回与 VSCode 扩展兼容的完整数据。
  */
 
 const KIMI_BASE_URL = 'https://www.kimi.com';
@@ -130,13 +130,21 @@ function parseBalanceSlot(balances) {
 }
 
 /**
- * 拉取 Kimi 配额数据
- * @returns {Promise<{slots: Array, level: string, currentEndTime: string, err: string}>}
+ * 拉取 Kimi 配额数据（完整格式，与 VSCode 扩展兼容）
  */
 export async function fetchKimiQuota() {
 	const token = await getKimiAuthToken();
 	if (!token) {
-		return { slots: [], level: '', currentEndTime: '', err: '未找到 kimi-auth Cookie' };
+		return {
+			id: 'kimi',
+			name: 'Kimi',
+			kind: 'kimi',
+			slots: [],
+			updatedAt: Date.now(),
+			level: '',
+			currentEndTime: '',
+			err: '未找到 kimi-auth Cookie，请先登录 Kimi',
+		};
 	}
 
 	try {
@@ -147,7 +155,16 @@ export async function fetchKimiQuota() {
 		]);
 
 		if (subData.code === 'unauthenticated') {
-			return { slots: [], level: '', currentEndTime: '', err: 'Kimi Cookie 已过期' };
+			return {
+				id: 'kimi',
+				name: 'Kimi',
+				kind: 'kimi',
+				slots: [],
+				updatedAt: Date.now(),
+				level: '',
+				currentEndTime: '',
+				err: 'Kimi Cookie 已过期，请重新登录',
+			};
 		}
 
 		// 解析用量
@@ -183,7 +200,11 @@ export async function fetchKimiQuota() {
 		const level = goods?.title ?? '';
 
 		return {
+			id: 'kimi',
+			name: 'Kimi',
+			kind: 'kimi',
 			slots,
+			updatedAt: Date.now(),
 			level,
 			membershipTitle: goods?.title,
 			currentEndTime: subscription?.currentEndTime
@@ -192,12 +213,23 @@ export async function fetchKimiQuota() {
 			nextBillingTime: subscription?.nextBillingTime
 				? subscription.nextBillingTime.slice(0, 10)
 				: '',
+			subscriptionStatus: subscription?.status,
+			subscriptionActive: subscription?.status === 'active',
+			balances: subData.balances?.map(b => ({
+				feature: b.feature,
+				amountUsedRatio: b.amountUsedRatio,
+				expireTime: b.expireTime,
+			})),
 			err: null,
 		};
 
 	} catch (err) {
 		return {
+			id: 'kimi',
+			name: 'Kimi',
+			kind: 'kimi',
 			slots: [],
+			updatedAt: Date.now(),
 			level: '',
 			currentEndTime: '',
 			err: err.message || '请求失败',

@@ -3,210 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src https://*.kimi.com https://*.xiaomimimo.com http://127.0.0.1:*; style-src 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src https://*.kimi.com https://*.xiaomimimo.com https://open.bigmodel.cn http://127.0.0.1:*; style-src 'self' 'unsafe-inline';">
   <title>AI Quota Dashboard</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f8f9fa;
-      color: #333;
-      min-height: 100vh;
-      padding: 24px;
-    }
-    .container {
-      max-width: 600px;
-      margin: 0 auto;
-    }
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
-    }
-    h1 {
-      font-size: 20px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .header-actions {
-      display: flex;
-      gap: 8px;
-    }
-    .btn {
-      padding: 6px 14px;
-      border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
-      transition: all 0.2s;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .btn-primary {
-      background: #7c3aed;
-      color: #fff;
-    }
-    .btn-primary:hover { background: #6d28d9; }
-    .btn-primary:disabled { background: #d1d5db; cursor: not-allowed; }
-    .btn-secondary {
-      background: #fff;
-      color: #7c3aed;
-      border: 1px solid #e5e7eb;
-    }
-    .btn-secondary:hover { background: #f9fafb; }
-
-    .service-card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-      border: 1px solid #e5e7eb;
-    }
-    .service-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-    }
-    .service-name {
-      font-size: 15px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .service-badge {
-      font-size: 10px;
-      padding: 2px 8px;
-      border-radius: 10px;
-      background: #f3f4f6;
-      color: #6b7280;
-      font-weight: 500;
-    }
-    .service-time {
-      font-size: 11px;
-      color: #9ca3af;
-    }
-
-    .slot {
-      margin-bottom: 12px;
-    }
-    .slot:last-child { margin-bottom: 0; }
-    .slot-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-    .slot-label {
-      font-size: 13px;
-      color: #4b5563;
-    }
-    .slot-percent {
-      font-size: 16px;
-      font-weight: 700;
-    }
-    .slot-percent.success { color: #22c55e; }
-    .slot-percent.warning { color: #f59e0b; }
-    .slot-percent.danger { color: #ef4444; }
-
-    .progress-bar {
-      height: 6px;
-      background: #f3f4f6;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .progress-fill {
-      height: 100%;
-      border-radius: 3px;
-      transition: width 0.3s ease;
-    }
-    .progress-fill.success { background: #22c55e; }
-    .progress-fill.warning { background: #f59e0b; }
-    .progress-fill.danger { background: #ef4444; }
-
-    .slot-detail {
-      font-size: 11px;
-      color: #9ca3af;
-      margin-top: 4px;
-    }
-
-    .error-card {
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      border-radius: 8px;
-      padding: 12px;
-      color: #991b1b;
-      font-size: 13px;
-    }
-    .error-card button {
-      margin-top: 8px;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 40px;
-      color: #9ca3af;
-    }
-    .empty-state p {
-      margin-top: 8px;
-      font-size: 14px;
-    }
-
-    .footer {
-      margin-top: 24px;
-      padding-top: 16px;
-      border-top: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 12px;
-      color: #9ca3af;
-    }
-    .bridge-status {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .bridge-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-    }
-    .bridge-dot.connected { background: #22c55e; }
-    .bridge-dot.disconnected { background: #ef4444; }
-
-    .spin { animation: spin 1s linear infinite; }
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-  </style>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="container">
     <header>
       <h1>📊 AI Quota Dashboard</h1>
       <div class="header-actions">
-        <button class="btn btn-secondary" id="btn-vscode">在 VSCode 打开</button>
+        <button class="btn btn-secondary" id="btn-settings">⚙️ 设置</button>
         <button class="btn btn-primary" id="btn-refresh">🔄 刷新</button>
       </div>
     </header>
 
-    <div id="services">
-      <div class="empty-state">
-        <p>加载中...</p>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">仪表盘</button>
+      <button class="tab-btn" data-tab="settings">设置</button>
+    </div>
+
+    <div class="tab-panel active" id="panel-dashboard">
+      <div id="services">
+        <div class="empty-state">
+          <p>加载中...</p>
+        </div>
       </div>
     </div>
 
-    <div class="footer">
-      <div class="bridge-status" id="bridge-status">
-        <span class="bridge-dot" id="bridge-dot"></span>
-        <span id="bridge-text">检测中...</span>
+    <div class="tab-panel" id="panel-settings">
+      <div class="sub-tabs">
+        <button class="sub-tab-btn active" data-subtab="services">服务管理</button>
+        <button class="sub-tab-btn" data-subtab="global">全局设置</button>
       </div>
-      <span id="last-update"></span>
+      <div class="sub-tab-panel active" id="subpanel-services"></div>
+      <div class="sub-tab-panel" id="subpanel-global"></div>
+    </div>
+
+    <div class="footer">
+      <span>AI Quota Dashboard</span>
+      <span class="last-update" id="last-update"></span>
     </div>
   </div>
 

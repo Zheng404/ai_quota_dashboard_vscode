@@ -10,7 +10,8 @@
   ],
   "host_permissions": [
     "https://*.kimi.com/",
-    "https://*.xiaomimimo.com/"
+    "https://*.xiaomimimo.com/",
+    "https://open.bigmodel.cn/"
   ],
   "background": {
     "service_worker": "scripts/background.js",

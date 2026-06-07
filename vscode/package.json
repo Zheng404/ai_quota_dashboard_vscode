@@ -26,6 +26,7 @@
     "coding-plan"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:aiQuotaDashboard.dashboardView",
     "onCommand:aiQuotaDashboard.refresh",
     "onCommand:aiQuotaDashboard.openDashboard",
