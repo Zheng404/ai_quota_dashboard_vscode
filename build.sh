@@ -22,7 +22,8 @@ mkdir -p "$BUILD_DIR"
 echo "📦 打包 Chrome 扩展..."
 cd "$SCRIPT_DIR/chrome"
 zip -r "$BUILD_DIR/ai-quota-cookie-bridge-chrome-v${VERSION}.zip" \
-  manifest.json popup.html dashboard.html dashboard.js \
+  manifest.json popup.html popup.js dashboard.html dashboard.js \
+  styles.css templates.js \
   api/ scripts/ icons/ > /dev/null
 echo "   ✓ Chrome: build/ai-quota-cookie-bridge-chrome-v${VERSION}.zip"
 
@@ -30,7 +31,8 @@ echo "   ✓ Chrome: build/ai-quota-cookie-bridge-chrome-v${VERSION}.zip"
 echo "📦 打包 Firefox 扩展..."
 cd "$SCRIPT_DIR/firefox"
 zip -r "$BUILD_DIR/ai-quota-cookie-bridge-firefox-v${VERSION}.zip" \
-  manifest.json popup.html dashboard.html dashboard.js \
+  manifest.json popup.html popup.js dashboard.html dashboard.js \
+  styles.css templates.js \
   api/ scripts/ icons/ > /dev/null
 echo "   ✓ Firefox: build/ai-quota-cookie-bridge-firefox-v${VERSION}.zip"
 

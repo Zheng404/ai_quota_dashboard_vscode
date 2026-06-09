@@ -33,12 +33,12 @@ async function getMimoCookieString() {
 /**
  * MiMo GET 请求
  */
-async function mimoGet(path, cookie) {
+async function mimoGet(path) {
 	const res = await fetch(`${MIMO_BASE_URL}${path}`, {
 		method: 'GET',
+		credentials: 'include',
 		headers: {
 			'Accept': 'application/json',
-			'Cookie': cookie,
 		},
 		signal: AbortSignal.timeout(10000),
 	});
@@ -89,8 +89,8 @@ export async function fetchMimoQuota() {
 
 	try {
 		const [usageRes, detailRes] = await Promise.all([
-			mimoGet('/api/v1/tokenPlan/usage', cookie),
-			mimoGet('/api/v1/tokenPlan/detail', cookie),
+			mimoGet('/api/v1/tokenPlan/usage'),
+			mimoGet('/api/v1/tokenPlan/detail'),
 		]);
 
 		if (usageRes.code !== 0) {

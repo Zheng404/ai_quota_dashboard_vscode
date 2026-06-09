@@ -266,11 +266,11 @@ export async function fetchGlmQuota() {
 		const { slots, level } = parseLimits(quotaRaw.data ?? { limits: [] });
 		const nextRenewTime = subRaw ? parseSubscription(subRaw) : undefined;
 
-		// 2. 模型用量（当日）
-		const modelUsage = await fetchGlmModelUsage(token, 1);
-
-		// 3. 工具用量（当日）
-		const toolUsage = await fetchGlmToolUsage(token, 1);
+		// 2. 模型用量 + 工具用量（并行）
+		const [modelUsage, toolUsage] = await Promise.all([
+			fetchGlmModelUsage(token, 1),
+			fetchGlmToolUsage(token, 1),
+		]);
 
 		return {
 			id: 'glm',

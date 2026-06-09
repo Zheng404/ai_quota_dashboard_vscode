@@ -634,4 +634,167 @@ Cookie: {COOKIE}
 
 ---
 
-*最后更新: 2026-05-30*
+## 浏览器扩展架构
+
+浏览器扩展（`chrome/` / `firefox/`）同时提供 **Cookie Bridge**（凭证转发）和 **仪表盘**（配额监控）两个功能。
+
+### 目录结构
+
+```
+chrome/（firefox/ 结构一致）
+├── manifest.json           # Manifest V3
+├── popup.html              # Popup 仪表盘 UI
+├── popup.js                # Popup 主逻辑（仪表盘 + 设置 + 服务管理）
+├── templates.js            # 卡片渲染模板（GLM/Kimi/MiMo + SVG 图表 + Tab 切换）
+├── styles.css              # 样式表（基于浏览器的普通 CSS，非 VSCode 变量）
+├── api/
+│   ├── glm.js              # GLM API 客户端（API Key 认证，从 storage 读取）
+│   ├── kimi.js             # Kimi API 客户端（Cookie 认证，从 chrome.cookies 读取）
+│   └── mimo.js             # MiMo API 客户端（Cookie 认证，从 chrome.cookies 读取）
+├── scripts/
+│   └── background.js       # Service Worker（按需 Cookie Bridge + 凭证失效检测 + 自动刷新）
+└── icons/
+```
+
+### 按需 Cookie Bridge 机制
+
+**核心逻辑**：默认不监控任何 Cookie，只有在 Popup 中添加了某个服务的卡片，才开启该服务的 Cookie Bridge。
+
+1. `popup.js` 维护 `config.services` 列表，保存在 `chrome.storage.local`（key: `dashboardConfig`）
+2. `background.js` 通过 `chrome.storage.onChanged` 监听配置变化
+3. 从 `dashboardConfig.services` 推导 `activeKinds`（需要监控的服务类型集合）
+4. Cookie 变化事件只处理 `activeKinds` 中的服务
+5. 添加/删除服务时，popup 发送 `configUpdated` 消息通知 background 更新监控目标
+
+```
+Popup (添加 Kimi 卡片)
+    │
+    ├─ saveConfig() → chrome.storage.local.set({ dashboardConfig })
+    ├─ notifyConfigUpdated() → chrome.runtime.sendMessage({ action: 'configUpdated' })
+    │
+    ▼
+Background (storage.onChanged 触发)
+    │
+    ├─ activeKinds = deriveActiveKinds(services)  // ['kimi']
+    ├─ 开始监控 kimi.com 的 kimi-auth Cookie
+    ├─ Cookie 变化 → relayCookies() → POST /cookies → VSCode Bridge
+    └─ 定时凭证检测 (credentialCheck alarm, 每 30 分钟)
+```
+
+### 凭证失效检测 + 自动刷新
+
+**检测机制**（每 30 分钟执行一次）：
+
+1. **Cookie 存在性检查**：`chrome.cookies.get()` 确认 Cookie 存在
+2. **过期时间检查**：非 session cookie 检查 `expirationDate`
+3. **API 探测**：
+   - Kimi：`GET https://www.kimi.com/api-user/user/info`（Bearer Token 认证）
+   - MiMo：`GET https://platform.xiaomimimo.com/api/v1/tokenPlan/detail`（Cookie 认证）
+   - 返回 401 = 凭证失效
+
+**自动刷新机制**：
+
+1. 检测到失效后，`chrome.tabs.create({ active: false })` 后台打开临时标签页
+2. 访问对应网站首页（kimi.com / platform.xiaomimimo.com）
+3. 等待页面加载完成（`chrome.tabs.onUpdated` 监听 `status: 'complete'`）
+4. 额外等待 2 秒让 JS 完全执行
+5. 关闭临时标签页
+6. 重新检测凭证有效性
+7. 刷新成功后自动 `relayCookies(true)` 推送给 VSCode
+
+### 消息协议（Popup ↔ Background）
+
+| 消息方向 | action | 说明 |
+|---------|--------|------|
+| Popup → Background | `relayNow` | 手动触发推送所有活跃服务的凭证 |
+| Popup → Background | `getStatus` | 获取 Bridge 连接状态 + 活跃服务列表 |
+| Popup → Background | `configUpdated` | 配置变更通知（添加/删除/保存服务后发送） |
+| Popup → Background | `checkCredentials` | 手动触发凭证检测 + 自动刷新 |
+
+`getStatus` 响应：
+```javascript
+{
+  connected: boolean,      // 是否已连接 VSCode Bridge
+  port: number | null,     // 当前活跃端口
+  activeKinds: string[],   // 当前活跃的服务类型列表，如 ['kimi', 'mimo']
+}
+```
+
+### 服务配置数据模型
+
+```javascript
+// chrome.storage.local: 'dashboardConfig'
+{
+  services: [
+    {
+      id: 'glm-1714000000000',  // {kind}-{timestamp}
+      kind: 'glm',              // 'glm' | 'kimi' | 'mimo'
+      name: 'GLM Coding Plan',  // 显示名称
+      enabled: true,
+    },
+    // ...
+  ],
+  glmApiKey: 'xxx.xxx.xxx',     // GLM API Key（仅 GLM 服务）
+  settings: {
+    refreshInterval: 600,        // 自动刷新间隔（秒）
+    warnThreshold: 0.8,          // 预警阈值
+  },
+}
+```
+
+### Cookie Bridge 推送数据格式
+
+```javascript
+// POST http://127.0.0.1:{port}/cookies
+{
+  source: 'ai-quota-cookie-bridge',
+  timestamp: number,
+  cookies: [
+    { service: 'kimi', name: 'kimi-auth', value: '...', domain: '.kimi.com', path: '/' },
+    { service: 'mimo', name: 'api-platform_serviceToken', value: '...', domain: '.xiaomimimo.com', path: '/' },
+    { service: 'mimo', name: 'userId', value: '...', domain: '.xiaomimimo.com', path: '/' },
+  ],
+  kimiAuthToken: '...',         // kimi-auth Cookie 值（方便 VSCode 直接用作 Bearer Token）
+  mimoCookie: 'name1=val1; name2=val2',  // MiMo Cookie 组合字符串
+}
+```
+
+### Popup 仪表盘功能
+
+Popup 打开后直接显示仪表盘（420px 宽弹窗），包含：
+
+- **仪表盘 Tab**：显示所有已添加服务的配额卡片
+  - GLM：配额进度条 + 模型/工具用量详情 + SVG 曲线图（支持当日/近7天/近30天 Tab 切换）
+  - Kimi：配额进度条 + 会员等级 + 有效期
+  - MiMo：套餐用量 + 补偿 Token + 有效期 + 自动续费状态
+- **设置 Tab**：
+  - 服务管理：添加/删除/保存服务
+  - Cookie Bridge 状态：按服务显示是否启用 Bridge
+  - 全局设置：刷新间隔、预警阈值
+  - 数据管理：清除缓存
+
+### 浏览器扩展与 VSCode 扩展的关系
+
+```
+浏览器扩展
+├── 功能 1：仪表盘（独立工作）
+│   └── Popup 中直接调用 API 查看配额，不依赖 VSCode
+│
+└── 功能 2：Cookie Bridge（需要 VSCode 扩展）
+    └── 将浏览器凭证转发给 VSCode，让 VSCode 扩展也能使用 Cookie 认证的服务
+```
+
+### Chrome 与 Firefox 的差异
+
+| 差异点 | Chrome | Firefox |
+|--------|--------|---------|
+| Manifest | 标准 V3 | V3 + `browser_specific_settings.gecko` |
+| Background | `service_worker` | `scripts`（数组） |
+| 扩展 ID | 自动生成 | 需在 manifest 中显式声明 |
+| Cookie API | `chrome.cookies` | `browser.cookies`（兼容） |
+| 持久性 | Service Worker 非持久 | 事件页面 |
+| tabs API | `chrome.tabs` | `browser.tabs`（兼容） |
+
+---
+
+*最后更新: 2026-06-08*

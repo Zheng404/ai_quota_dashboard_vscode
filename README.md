@@ -54,7 +54,7 @@
 | 🎯 **多服务支持** | 支持 GLM Coding Plan (CN)、Kimi Membership、Xiaomi MiMo Token Plan，通过注册表模式易于扩展更多 AI 服务 |
 | 📊 **实时仪表盘** | 侧边栏 Webview 展示配额进度、用量统计、历史趋势，支持 SVG 曲线图 |
 | 📈 **状态栏监控** | 底部状态栏实时显示配额使用率、Token 用量和倒计时，颜色预警（绿/黄/红） |
-| 🌉 **浏览器 Cookie Bridge** | Chrome / Edge / Firefox 扩展自动同步浏览器登录态，无需手动复制 Token |
+| 🌉 **按需 Cookie Bridge** | 添加服务卡片即开启凭证自动获取和转发，失效时后台自动刷新 token，无需手动干预 |
 | 🔐 **双模式认证** | 支持「手动输入 Token」和「浏览器扩展自动同步」两种鉴权方式 |
 | 💤 **智能 AFK 检测** | 用户长时间无操作后自动暂停刷新，节省系统资源和 API 调用次数 |
 | ⚡ **高性能缓存** | LRU 内存缓存（60s TTL）+ AsyncQueue 并发控制，避免重复请求和竞态条件 |
@@ -142,7 +142,11 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 ### 浏览器扩展（可选）
 
-浏览器扩展用于自动同步已登录网站的 Cookie 到 VSCode 扩展，**无需手动复制粘贴 Token**。
+浏览器扩展同时具备 **Cookie Bridge** 和 **仪表盘** 两个功能，按服务卡片按需启用：
+
+- **Cookie Bridge**：添加哪个服务卡片，就开启哪个卡片的 Cookie 凭证自动获取和转发
+- **凭证自动刷新**：凭证从浏览器 Cookie 自动获取，失效时后台自动刷新，无需手动干预
+- **Popup 仪表盘**：直接在浏览器弹窗中查看 GLM / Kimi / MiMo 的实时配额状态，与 VSCode 扩展仪表盘一致
 
 #### Chrome / Edge
 
@@ -170,16 +174,12 @@ code --install-extension ai-quota-dashboard-*.vsix
 适合 **Kimi** 和 **MiMo** 等基于浏览器 Cookie 鉴权的服务。
 
 1. **安装 VSCode 扩展** 和 **浏览器扩展**（见上方安装步骤）
-2. 在浏览器中登录目标网站：
-   - [kimi.com](https://www.kimi.com)（Kimi）
-   - [xiaomimimo.com](https://platform.xiaomimimocom)（MiMo）
-3. VSCode 中打开 **AI Quota Dashboard** 侧边栏（点击活动栏图标或执行命令 `AI Quota Dashboard: 打开配额面板`）
-4. 切换到 **「设置」** 标签，点击 **「添加服务」**：
-   - **服务类型**：选择 Kimi / MiMo / GLM
-   - **认证方式**：选择 **"Cookie Bridge 自动获取"**
-   - 点击 **保存**
-5. 浏览器扩展会自动检测对应网站的 Cookie 变化，并安全推送给 VSCode 扩展
-6. 返回 **「仪表盘」** 查看实时配额状态
+2. 点击浏览器扩展图标打开 **Popup** 面板
+3. 切换到 **「设置」** 标签，添加需要的服务：
+   - **Kimi / MiMo**：凭证自动从浏览器 Cookie 获取，添加卡片即开启该服务的 Cookie Bridge
+   - **GLM**：在设置中手动输入 API Key（GLM 使用 API Key 鉴权，无需 Cookie Bridge）
+4. 返回 **「仪表盘」** 查看实时配额状态
+5. 浏览器扩展会自动检测凭证有效性，失效时后台自动刷新，无需手动干预
 
 > 💡 **提示**：浏览器扩展支持防抖推送（1.5s 延迟）和失败重试（最多 3 次），确保 Cookie 同步稳定可靠。
 
@@ -329,8 +329,8 @@ interface ServiceDescriptor {
 ```
 Browser Extension                        VSCode Extension
       │                                        │
-      │  1. 监控目标网站 Cookie 变化            │
-      ├───────────────────────────────────────▶│
+      │  1. Popup 添加服务卡片后按需监控 Cookie  │
+      │     （只有添加了卡片的服务才监控）       │
       │                                        │
       │  2. 启动本地 HTTP 服务器 (localhost)    │
       │◀───────────────────────────────────────┤
@@ -347,7 +347,20 @@ Browser Extension                        VSCode Extension
       │                                        │
       │  8. 返回成功响应                        │
       │◀───────────────────────────────────────┤
+      │                                        │
+      │  9. 每 30 分钟检测凭证有效性            │
+      │     失效时后台打开临时标签页自动刷新     │
+      │◀───────────────────────────────────────┤
 ```
+
+**按需启用**：
+- 只有 Popup 中添加了对应服务的卡片，才监控该服务的 Cookie
+- 未添加卡片的服务不会触发 Cookie 推送，避免不必要的资源消耗
+
+**凭证自动刷新**：
+- `background.js` 每 30 分钟检查一次凭证有效性
+- 检测到凭证失效时，自动在后台打开临时标签页访问目标网站刷新 token
+- 刷新完成后自动关闭临时标签页，全程无感知
 
 **安全机制**：
 - 动态 Token 认证（每次 VSCode 启动生成随机 token）
@@ -356,6 +369,38 @@ Browser Extension                        VSCode Extension
 - 请求体大小限制（≤ 1MB），防止 DoS
 - POST 请求 5 秒超时
 - 所有浏览器扩展页面使用 `createElement`/`textContent` 替代 `innerHTML`，并配置 CSP
+
+### 凭证自动刷新
+
+background.js 每 **30 分钟** 执行一次凭证健康检查：
+
+1. **Cookie 存在性检查**：`chrome.cookies.get()` 确认 Cookie 存在
+2. **过期时间检查**：非 session cookie 检查 `expirationDate`
+3. **轻量 API 探测**：
+   - Kimi：`GET /api-user/user/info`（Bearer Token 认证）
+   - MiMo：`GET /api/v1/tokenPlan/detail`（Cookie 认证）
+   - 返回 401 = 凭证失效
+
+检测到失效后自动执行后台刷新：
+
+1. 在后台打开临时标签页，访问对应网站首页（kimi.com / xiaomimimo.com）
+2. 等待页面加载完成（触发浏览器自动刷新 Cookie）
+3. 关闭临时标签页
+4. 重新检测凭证有效性，通过后自动推送给 VSCode
+
+整个过程在后台静默完成，不会打扰用户。刷新失败将在下次检测周期重试。
+
+### 浏览器扩展核心组件
+
+| 组件 | 文件 | 职责 |
+|------|------|------|
+| Service Worker | `scripts/background.js` | 按需 Cookie 监控、凭证失效检测、自动刷新、防抖推送、与 VSCode 通信 |
+| Popup | `popup.html` + `popup.js` | 仪表盘弹窗，显示配额卡片、详情 Tab、设置管理 |
+| 卡片模板 | `templates.js` | GLM / Kimi / MiMo 配额卡片和 SVG 图表模板 |
+| 样式表 | `styles.css` | Popup 和卡片样式 |
+| GLM API | `api/glm.js` | GLM 配额数据拉取（API Key 认证） |
+| Kimi API | `api/kimi.js` | Kimi 配额数据拉取（Cookie 认证） |
+| MiMo API | `api/mimo.js` | MiMo 配额数据拉取（Cookie 认证） |
 
 ### 数据流
 
@@ -441,6 +486,18 @@ npm run test:watch
 ### 浏览器扩展开发
 
 浏览器扩展为纯 JavaScript，**无需构建步骤**。
+
+```
+chrome/
+├── manifest.json
+├── popup.html / popup.js    # Popup 仪表盘
+├── templates.js              # 卡片模板
+├── styles.css                # 样式表
+├── api/                      # API 客户端
+│   ├── glm.js / kimi.js / mimo.js
+└── scripts/
+    └── background.js         # Service Worker（按需 Cookie Bridge + 凭证检测）
+```
 
 ```bash
 # Chrome / Edge
@@ -532,6 +589,17 @@ build/
 
 **A**: 未安装 VSCode 类型定义。请运行 `cd vscode && npm install` 确保 `@types/vscode` 已正确安装。
 
+### Q: 浏览器扩展仪表盘显示「暂无服务」？
+
+**A**: 浏览器扩展默认为空服务列表。点击 Popup 切换到「设置」标签，添加需要监控的 AI 服务卡片。添加 Kimi / MiMo 卡片后自动开启 Cookie Bridge。
+
+### Q: Kimi / MiMo 凭证自动刷新失败？
+
+**A**: 可能原因：
+1. **浏览器阻止了后台标签页**：检查浏览器设置是否阻止了后台打开标签页
+2. **用户未登录**：手动访问对应网站确认已登录
+3. **网站服务器问题**：等待下次检测周期（30 分钟）自动重试
+
 ---
 
 ## 技术栈
@@ -558,7 +626,10 @@ build/
 
 **新增**
 
-- 🌉 **浏览器扩展（Cookie Bridge）**：Chrome/Edge 和 Firefox 双平台支持，自动同步 `kimi.com` 和 `xiaomimimo.com` Cookie
+- 🌉 **按需 Cookie Bridge**：只有添加了服务卡片才开启对应服务的凭证监控，避免全局 Cookie 监听
+- 🔄 **凭证失效检测**：每 30 分钟自动检查 Cookie 有效性，后台无感知刷新
+- 🔄 **凭证自动刷新**：检测到失效时自动打开临时标签页访问目标网站刷新 token
+- 📊 **Popup 仪表盘**：浏览器扩展弹窗中直接查看 GLM / Kimi / MiMo 配额状态
 - 🔐 **双模式认证**：`manual`（手动输入）和 `bridge`（浏览器自动同步）
 - ⚡ **LRU 内存缓存**：限制最大 100 条目，防止内存泄漏
 - ⚡ **AsyncQueue 并发控制**：Promise-based 串行队列，消除竞态条件
@@ -598,6 +669,33 @@ build/
 - 测试文件与源码同目录，命名 `{source}.test.ts`
 - 注释使用中文
 - 优先使用专用工具（Read/Write/Edit）而非系统命令操作文件
+
+---
+
+## 隐私政策
+
+**本扩展不收集任何用户数据。**
+
+- 不发送数据到开发者服务器
+- 不上传 Cookie 到云端
+- 不使用任何第三方分析或追踪服务
+
+扩展仅在以下场景处理数据：
+
+1. **读取 Cookie**：仅读取已在 Popup 中添加的服务对应的 Cookie（kimi.com / xiaomimimo.com）
+2. **本地传输**：通过 `localhost` HTTP 请求将 Cookie 发送至 VSCode 扩展
+3. **内存缓存**：Cookie 仅在 Service Worker 内存中临时保存（用于防抖和重试），不持久化
+4. **自动刷新**：仅在检测到凭证失效时，临时访问对应网站首页以刷新 Cookie
+
+浏览器扩展权限说明：
+
+| 权限 | 用途 |
+|------|------|
+| `cookies` | 读取目标网站的认证 Cookie（仅已添加的服务） |
+| `storage` | 存储扩展自身配置（服务列表、连接状态） |
+| `tabs` | 后台打开临时标签页进行凭证自动刷新 |
+| `host_permissions` | 访问 `kimi.com`、`xiaomimimo.com`、`bigmodel.cn` |
+| `alarms` | 定时凭证检测和健康检查 |
 
 ---
 

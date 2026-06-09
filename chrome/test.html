@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Test</title>
+</head>
+<body>
+  <script type="module">
+    console.log('Module loading...');
+    try {
+      import('./popup.js').then(() => {
+        console.log('Module loaded successfully');
+      }).catch(err => {
+        console.error('Import failed:', err.message, err.stack);
+      });
+    } catch (e) {
+      console.error('Sync error:', e.message, e.stack);
+    }
+  </script>
+</body>
+</html>

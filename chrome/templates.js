@@ -101,6 +101,13 @@ function renderGlmHeader(data) {
 	const renewLine = data.nextRenewTime
 		? `<div class="glm-header-row glm-header-row3"><span class="glm-renew-label">会员有效期至：</span><span class="glm-renew-time">${escapeHtml(data.nextRenewTime)}</span></div>`
 		: '';
+	// Cookie Bridge 状态
+	const bridgeStatus = data.bridgeStatus;
+	const bridgeText = bridgeStatus === 'connected' ? '已连接' : bridgeStatus === 'active' ? '等待 VSCode 连接' : '未启用';
+	const bridgeColor = bridgeStatus === 'connected' ? '#22c55e' : bridgeStatus === 'active' ? '#f59e0b' : '#ef4444';
+	const bridgeLine = bridgeStatus
+		? `<div class="glm-header-row glm-header-row3" style="margin-top: 2px;"><span style="font-size: 10px; color: ${bridgeColor};">🍪 Cookie Bridge: ${bridgeText}</span></div>`
+		: '';
 	return `<div class="glm-header">`
 		+ `<div class="glm-header-row">`
 		+ `<div class="glm-header-left">`
@@ -114,6 +121,7 @@ function renderGlmHeader(data) {
 		+ `<span class="glm-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ renewLine
+		+ bridgeLine
 		+ `</div>`;
 }
 
@@ -293,6 +301,13 @@ function renderKimiHeader(data) {
 	const renewLine = data.currentEndTime
 		? `<div class="kimi-header-row kimi-header-row3"><span class="kimi-renew-label">会员有效期至：</span><span class="kimi-renew-time">${escapeHtml(data.currentEndTime)}</span></div>`
 		: '';
+	// Cookie Bridge 状态
+	const bridgeStatus = data.bridgeStatus;
+	const bridgeText = bridgeStatus === 'connected' ? '已连接' : bridgeStatus === 'active' ? '等待 VSCode 连接' : '未启用';
+	const bridgeColor = bridgeStatus === 'connected' ? '#22c55e' : bridgeStatus === 'active' ? '#f59e0b' : '#ef4444';
+	const bridgeLine = bridgeStatus
+		? `<div class="kimi-header-row kimi-header-row3" style="margin-top: 2px;"><span style="font-size: 10px; color: ${bridgeColor};">🍪 Cookie Bridge: ${bridgeText}</span></div>`
+		: '';
 	return `<div class="kimi-header">`
 		+ `<div class="kimi-header-row">`
 		+ `<div class="kimi-header-left">`
@@ -306,6 +321,7 @@ function renderKimiHeader(data) {
 		+ `<span class="kimi-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ renewLine
+		+ bridgeLine
 		+ `</div>`;
 }
 
@@ -346,6 +362,13 @@ function renderMimoHeader(data) {
 	const expiryLine = data.currentPeriodEnd
 		? `<div class="mimo-header-row mimo-header-row3"><span class="mimo-expiry-label">有效期至：</span><span class="mimo-expiry-time">${escapeHtml(data.currentPeriodEnd)}</span></div>`
 		: '';
+	// Cookie Bridge 状态
+	const bridgeStatus = data.bridgeStatus;
+	const bridgeText = bridgeStatus === 'connected' ? '已连接' : bridgeStatus === 'active' ? '等待 VSCode 连接' : '未启用';
+	const bridgeColor = bridgeStatus === 'connected' ? '#22c55e' : bridgeStatus === 'active' ? '#f59e0b' : '#ef4444';
+	const bridgeLine = bridgeStatus
+		? `<div class="mimo-header-row mimo-header-row3" style="margin-top: 2px;"><span style="font-size: 10px; color: ${bridgeColor};">🍪 Cookie Bridge: ${bridgeText}</span></div>`
+		: '';
 	return `<div class="mimo-header">`
 		+ `<div class="mimo-header-row">`
 		+ `<div class="mimo-header-left">`
@@ -359,6 +382,7 @@ function renderMimoHeader(data) {
 		+ `<span class="mimo-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ expiryLine
+		+ bridgeLine
 		+ `</div>`;
 }
 
