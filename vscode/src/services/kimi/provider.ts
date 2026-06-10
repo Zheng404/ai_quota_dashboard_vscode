@@ -101,7 +101,7 @@ async function connectPost<T>(url: string, token: string, body: unknown, timeout
 
 // ========== 数据解析 ==========
 
-/** 解析窗口限制配额（频限明细） */
+/** 解析窗口限制配额（频率限制明细） */
 export function parseWindowSlot(limits: KimiWindowLimit[]): QuotaSlot | undefined {
 	if (!limits || limits.length === 0) return undefined;
 
@@ -220,7 +220,7 @@ export const kimiProvider: QuotaProvider = {
 			throw new Error(`Kimi 接口返回错误: ${subData.code}`);
 		}
 
-		// 2. 拉取用量统计（频限明细 + 本周用量）
+		// 2. 拉取用量统计（频率限制明细 + 本周用量）
 		const usageData = await connectPost<KimiUsagesResponse>(
 			`${base}/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages`,
 			apiKey,

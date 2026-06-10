@@ -19,7 +19,7 @@ describe('parseWindowSlot', () => {
 			detail: { limit: '1000', used: '500', resetTime: '2024-01-01T00:00:00Z' },
 		}]);
 		expect(result).toBeDefined();
-		expect(result?.label).toBe('频限明细 (5hour)');
+		expect(result?.label).toBe('频率限制明细 (5hour)');
 		expect(result?.percent).toBe(50);
 		expect(result?.used).toBe(500);
 		expect(result?.limit).toBe(1000);
@@ -30,7 +30,7 @@ describe('parseWindowSlot', () => {
 			window: { duration: 5, timeUnit: 'TIME_UNIT_HOUR' },
 			detail: { limit: '1000', used: '200' },
 		}]);
-		expect(result?.label).toBe('频限明细 (5hour)');
+		expect(result?.label).toBe('频率限制明细 (5hour)');
 		expect(result?.percent).toBe(20);
 	});
 
@@ -39,7 +39,7 @@ describe('parseWindowSlot', () => {
 			window: { duration: 7, timeUnit: 'TIME_UNIT_WEEK' },
 			detail: { limit: '1000', used: '100' },
 		}]);
-		expect(result?.label).toBe('频限明细 (7)');
+		expect(result?.label).toBe('频率限制明细 (7)');
 	});
 
 	it('returns undefined when detail is missing', () => {
