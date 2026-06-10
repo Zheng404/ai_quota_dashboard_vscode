@@ -34,7 +34,7 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 		if (meta && meta.keyHint && !isBridge) {
 			hintHtml = '<div class="form-row-hint"><span class="form-hint">' + escapeHtml(meta.keyHint) + '</span>';
 			if (meta.showHelpButton) {
-				hintHtml += '<button type="button" class="btn btn-link svc-help-btn" data-help-cmd="' + meta.helpCommand + '">如何获取？</button>';
+				hintHtml += '<button type="button" class="btn btn-link svc-help-btn" data-help-cmd="' + meta.helpCommand + '">如何获取密钥？</button>';
 			}
 			hintHtml += '</div>';
 		}
@@ -48,12 +48,12 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 		let keyHtml = '';
 		if (isBridge) {
 			const hasKey = key.length > 0;
-			keyHtml = '<div class="svc-bridge-status"><span class="bridge-badge ' + (hasKey ? 'connected' : 'disconnected') + '">' + (hasKey ? '✅ 已通过浏览器扩展获取' : '⏳ 等待浏览器扩展推送...') + '</span></div>';
+			keyHtml = '<div class="svc-bridge-status"><span class="bridge-badge ' + (hasKey ? 'connected' : 'disconnected') + '">' + (hasKey ? '已通过浏览器扩展获取' : '等待浏览器扩展推送凭证...') + '</span></div>';
 		} else {
 			keyHtml = '<input type="text" class="form-input svc-key" placeholder="' + escapeHtml(placeholder) + '" value="' + escapeHtml(key) + '" autocomplete="off">' + hintHtml;
 		}
 
-		return '<div class="service-item" data-id="' + escapeHtml(p.id) + '"><div class="svc-row-kind"><span class="svc-kind-label" data-kind="' + escapeHtml(p.kind) + '">' + escapeHtml(kindLabel) + '</span></div><div class="svc-row-name"><input type="text" class="form-input svc-name" value="' + escapeHtml(p.displayName) + '" placeholder="显示名称"></div>' + dsSelect + keyHtml + '<div class="svc-row-actions"><button type="button" class="btn btn-sm btn-delete remove-service-btn">删除</button><button type="button" class="btn btn-sm btn-primary save-service-btn">保存</button></div></div>';
+		return '<div class="service-item" data-id="' + escapeHtml(p.id) + '"><div class="svc-row-kind"><span class="svc-kind-label" data-kind="' + escapeHtml(p.kind) + '">' + escapeHtml(kindLabel) + '</span></div><div class="svc-row-name"><input type="text" class="form-input svc-name" value="' + escapeHtml(p.displayName) + '" placeholder="显示名称"></div>' + dsSelect + keyHtml + '<div class="svc-row-actions"><button type="button" class="btn btn-sm btn-delete remove-service-btn">移除服务</button><button type="button" class="btn btn-sm btn-primary save-service-btn">保存配置</button></div></div>';
 	}
 
 	function renderServiceListSettings(settings) {
@@ -63,11 +63,11 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 		const options = serviceSettingsMap.map(s =>
 			'<option value="' + escapeHtml(s.kind) + '">' + escapeHtml(s.displayName) + '</option>'
 		).join('');
-		return '<div class="settings-section"><div class="section-header"><div class="add-service-row"><select class="form-input add-service-select" id="new-service-kind">' + options + '</select><button type="button" class="btn btn-sm btn-primary" id="add-service-btn">+ 添加</button></div></div><div id="services-list">' + items + '</div></div>';
+		return '<div class="settings-section"><div class="section-header"><div class="add-service-row"><select class="form-input add-service-select" id="new-service-kind">' + options + '</select><button type="button" class="btn btn-sm btn-primary" id="add-service-btn">+ 添加服务</button></div></div><div id="services-list">' + items + '</div></div>';
 	}
 
 	function renderGlobalSettings(settings) {
-		return '<div class="settings-section"><div class="form-group"><label class="form-label" for="refreshInterval">自动刷新间隔（秒，0 禁用）</label><input type="number" id="refreshInterval" class="form-input" value="' + escapeHtml(String(settings.refreshInterval)) + '" min="0" step="60"></div><div class="form-group"><label class="form-label" for="warnThreshold">预警阈值（0-1）</label><input type="number" id="warnThreshold" class="form-input" value="' + escapeHtml(String(settings.warnThreshold)) + '" min="0" max="1" step="0.05"></div><div class="form-group"><label class="form-label" for="afkThreshold">AFK 检测（秒，0 禁用）</label><input type="number" id="afkThreshold" class="form-input" value="' + escapeHtml(String(settings.afkThreshold)) + '" min="0" step="60"><span class="form-hint">用户无操作超过此时长后暂停刷新，默认 1 小时</span></div><div class="form-actions"><button type="button" class="btn btn-primary" id="save-global-btn">保存全局设置</button></div><div class="form-actions" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--vscode-panel-border);"><button type="button" class="btn btn-danger" id="reset-data-btn">重置所有数据</button></div></div>';
+		return '<div class="settings-section"><div class="form-group"><label class="form-label" for="refreshInterval">自动刷新间隔（秒，0 表示禁用）</label><input type="number" id="refreshInterval" class="form-input" value="' + escapeHtml(String(settings.refreshInterval)) + '" min="0" step="60"></div><div class="form-group"><label class="form-label" for="warnThreshold">预警阈值（0 - 1）</label><input type="number" id="warnThreshold" class="form-input" value="' + escapeHtml(String(settings.warnThreshold)) + '" min="0" max="1" step="0.05"></div><div class="form-group"><label class="form-label" for="afkThreshold">离开检测（秒，0 表示禁用）</label><input type="number" id="afkThreshold" class="form-input" value="' + escapeHtml(String(settings.afkThreshold)) + '" min="0" step="60"><span class="form-hint">用户无操作超过此时长后暂停自动刷新，默认 1 小时</span></div><div class="form-actions"><button type="button" class="btn btn-primary" id="save-global-btn">保存全局配置</button></div><div class="form-actions" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--vscode-panel-border);"><button type="button" class="btn btn-danger" id="reset-data-btn">重置所有数据</button></div></div>';
 	}
 
 	// ====== 事件绑定 ======

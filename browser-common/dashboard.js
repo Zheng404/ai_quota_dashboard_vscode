@@ -7,7 +7,7 @@
 import { fetchGlmQuota, fetchGlmDetail } from './api/glm.js';
 import { fetchKimiQuota } from './api/kimi.js';
 import { fetchMimoQuota } from './api/mimo.js';
-import { renderService, switchGlmMainTab, switchGlmSubTab, mergeGlmDetailData, fmtDateTime } from './templates.js';
+import { renderService, switchGlmMainTab, switchGlmSubTab, mergeGlmDetailData, cleanupGlmState, fmtDateTime } from './templates.js';
 
 // ===== 常量 =====
 
@@ -21,9 +21,9 @@ const SERVICE_FETCHERS = {
 };
 
 const SERVICE_LABELS = {
-	glm: 'GLM Coding Plan',
-	kimi: 'Kimi Membership',
-	mimo: 'Xiaomi MiMo',
+	glm: 'GLM 编码计划',
+	kimi: 'Kimi 会员',
+	mimo: '小米 MiMo',
 };
 
 // ===== DOM 元素 =====
@@ -133,7 +133,7 @@ async function loadService(serviceConfig, force = false) {
 			kind,
 			slots: [],
 			updatedAt: Date.now(),
-			err: `未知的服务类型: ${kind}`,
+			err: `不支持的服务类型: ${kind}`,
 		};
 	}
 
@@ -153,7 +153,7 @@ async function loadService(serviceConfig, force = false) {
 			kind,
 			slots: [],
 			updatedAt: Date.now(),
-			err: err.message || '加载失败',
+			err: err.message || '加载失败，请检查网络连接后重试',
 		};
 	}
 }
@@ -163,7 +163,7 @@ async function loadAll(force = false) {
 	isLoading = true;
 
 	refreshBtn.disabled = true;
-	refreshBtn.innerHTML = '<span class="spin">🔄</span> 刷新中...';
+	refreshBtn.innerHTML = '<span class="spin"></span>刷新中...';
 
 	// 保存 GLM API Key 到 storage（让 api/glm.js 能读取）
 	if (config.glmApiKey) {
@@ -175,20 +175,20 @@ async function loadAll(force = false) {
 	const enabledServices = config.services.filter(s => s.enabled);
 
 	if (enabledServices.length === 0) {
-		servicesEl.innerHTML = `
-			<div class="empty-state">
-				<div class="empty-icon">📊</div>
-				<p class="empty-title">暂无服务</p>
-				<p class="empty-hint">切换到「设置」标签启用或添加服务</p>
-			</div>`;
+			servicesEl.innerHTML = `
+				<div class="empty-state">
+					<div class="empty-icon">📊</div>
+					<p class="empty-title">暂无服务数据</p>
+					<p class="empty-hint">切换到「设置」标签启用或添加服务</p>
+				</div>`;
 		refreshBtn.disabled = false;
-		refreshBtn.innerHTML = '🔄 刷新';
+		refreshBtn.innerHTML = '刷新';
 		isLoading = false;
 		return;
 	}
 
 	if (force || serviceDataMap.size === 0) {
-		servicesEl.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+		servicesEl.innerHTML = '<div class="empty-state"><p>数据加载中...</p></div>';
 	}
 
 	const tasks = enabledServices.map(svc => loadService(svc, force));
@@ -203,7 +203,7 @@ async function loadAll(force = false) {
 	lastUpdateEl.textContent = `更新于 ${fmtDateTime(new Date())}`;
 
 	refreshBtn.disabled = false;
-	refreshBtn.innerHTML = '🔄 刷新';
+	refreshBtn.innerHTML = '刷新';
 	isLoading = false;
 }
 
@@ -231,7 +231,7 @@ function renderDashboard() {
 		servicesEl.innerHTML = `
 			<div class="empty-state">
 				<div class="empty-icon">📊</div>
-				<p class="empty-title">暂无服务</p>
+				<p class="empty-title">暂无服务数据</p>
 				<p class="empty-hint">切换到「设置」标签启用或添加服务</p>
 			</div>`;
 		return;
@@ -246,7 +246,7 @@ function renderDashboard() {
 	}
 
 	if (!html) {
-		html = '<div class="empty-state"><p>加载中...</p></div>';
+		html = '<div class="empty-state"><p>数据加载中...</p></div>';
 	}
 
 	servicesEl.innerHTML = html;
@@ -280,8 +280,8 @@ function renderSettingsServices() {
 				</div>
 				`}
 				<div class="svc-actions">
-					<button class="btn btn-sm btn-primary save-svc-btn" data-service-id="${svc.id}">保存</button>
-					${isGlm ? `<button class="btn btn-sm btn-danger remove-svc-btn" data-service-id="${svc.id}">删除</button>
+					<button class="btn btn-sm btn-primary save-svc-btn" data-service-id="${svc.id}">保存配置</button>
+					${isGlm ? `<button class="btn btn-sm btn-danger remove-svc-btn" data-service-id="${svc.id}">删除服务</button>
 					` : ''}
 				</div>
 			</div>`;
@@ -419,7 +419,7 @@ async function handleSaveService(e) {
 
 	await saveConfig();
 	btn.textContent = '已保存';
-	setTimeout(() => btn.textContent = '保存', 1500);
+	setTimeout(() => btn.textContent = '保存配置', 1500);
 
 	// 如果保存的是 GLM 且有 API Key，尝试刷新
 	if (svc.kind === 'glm' && config.glmApiKey) {
@@ -430,15 +430,22 @@ async function handleSaveService(e) {
 async function handleRemoveService(e) {
 	const btn = e.target;
 	const serviceId = btn.dataset.serviceId;
+	const svc = config.services.find(s => s.id === serviceId);
 	if (!confirm('确定要删除此服务吗？')) return;
 
 	config.services = config.services.filter(s => s.id !== serviceId);
-	if (serviceId === 'glm') {
+	if (svc && svc.kind === 'glm') {
 		config.glmApiKey = '';
 		await chrome.storage.local.remove('glmApiKey');
 	}
 	await saveConfig();
 	serviceDataMap.delete(serviceId);
+
+	// 清理 GLM 状态（防止内存泄漏）
+	if (svc && svc.kind === 'glm') {
+		cleanupGlmState(serviceId);
+	}
+
 	renderSettingsServices();
 	renderDashboard();
 }

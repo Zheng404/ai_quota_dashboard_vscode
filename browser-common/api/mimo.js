@@ -45,7 +45,7 @@ async function mimoGet(path) {
 
 	if (!res.ok) {
 		if (res.status === 401) {
-			throw new Error('MiMo 鉴权失败：Cookie 已过期');
+			throw new Error('MiMo 认证失败：Cookie 已过期，请重新登录 MiMo');
 		}
 		throw new Error(`HTTP ${res.status}`);
 	}
@@ -83,7 +83,7 @@ export async function fetchMimoQuota() {
 			updatedAt: Date.now(),
 			planName: '',
 			currentPeriodEnd: '',
-			err: '未找到 MiMo Cookie，请先登录 MiMo',
+			err: '未获取到 MiMo 登录凭证，请先登录 MiMo 网站',
 		};
 	}
 
@@ -102,7 +102,7 @@ export async function fetchMimoQuota() {
 				updatedAt: Date.now(),
 				planName: '',
 				currentPeriodEnd: '',
-				err: `MiMo 用量接口错误: ${usageRes.message || usageRes.code}`,
+				err: `MiMo 用量接口返回错误: ${usageRes.message || usageRes.code}`,
 			};
 		}
 
@@ -144,7 +144,7 @@ export async function fetchMimoQuota() {
 			updatedAt: Date.now(),
 			planName: '',
 			currentPeriodEnd: '',
-			err: err.message || '请求失败',
+			err: err.message || '请求失败，请稍后重试',
 		};
 	}
 }

@@ -16,6 +16,11 @@ function getPortFilePath(): string {
 	return path.join(os.tmpdir(), `.ai-quota-bridge-port-${process.pid}`);
 }
 
+/** 生成通用端口文件路径（供浏览器扩展发现） */
+function getGenericPortFilePath(): string {
+	return path.join(os.tmpdir(), '.ai-quota-bridge-port');
+}
+
 /** 浏览器扩展推送的 Cookie 数据 */
 export interface CookiePayload {
 	source: string;
@@ -30,6 +35,8 @@ export interface CookiePayload {
 	kimiAuthToken?: string;
 	/** MiMo 完整 Cookie 字符串 */
 	mimoCookie?: string;
+	/** GLM API Key */
+	glmApiKey?: string;
 }
 
 /** Cookie 接收回调 */
@@ -58,27 +65,44 @@ export class CookieBridgeServer {
 		return randomBytes(32).toString('hex');
 	}
 
+	/** 预定义端口列表（与浏览器扩展对齐） */
+	private readonly fallbackPorts = [37100, 37101, 37102, 37103, 37104, 37105, 37106, 37107, 37108, 37109, 37110];
+
 	/** 启动服务器 */
 	async start(preferredPort?: number): Promise<number> {
-		return new Promise((resolve, reject) => {
-			this.server = http.createServer((req, res) => this.handleRequest(req, res));
+		const portsToTry = preferredPort
+			? [preferredPort, ...this.fallbackPorts.filter(p => p !== preferredPort)]
+			: this.fallbackPorts;
 
-			this.server.on('error', (err: NodeJS.ErrnoException) => {
-				if (err.code === 'EADDRINUSE' && preferredPort) {
-					// 首选端口被占用，尝试随机端口
-					this.log(`端口 ${preferredPort} 被占用，使用随机端口`);
-					this.server = http.createServer((req, res) => this.handleRequest(req, res));
-			this.server.listen(0, '127.0.0.1', () => {
-					this.onListening(resolve, reject);
-				});
-				} else {
-					reject(err);
+		for (let i = 0; i < portsToTry.length; i++) {
+			const port = portsToTry[i];
+			try {
+				const actualPort = await this.tryListen(port);
+				return actualPort;
+			} catch (err: unknown) {
+				const errnoErr = err as NodeJS.ErrnoException;
+				if (errnoErr.code === 'EADDRINUSE') {
+					this.log(`端口 ${port} 被占用，尝试下一个...`);
+					continue;
 				}
+				throw err;
+			}
+		}
+		throw new Error(`所有预定义端口均被占用: ${portsToTry.join(', ')}`);
+	}
+
+	private async tryListen(port: number): Promise<number> {
+		return new Promise((resolve, reject) => {
+			const server = http.createServer((req, res) => this.handleRequest(req, res));
+
+			server.on('error', (err: NodeJS.ErrnoException) => {
+				reject(err);
 			});
 
-		this.server.listen(preferredPort ?? 0, '127.0.0.1', () => {
-			this.onListening(resolve, reject);
-		});
+			server.listen(port, '127.0.0.1', () => {
+				this.server = server;
+				this.onListening(resolve, reject);
+			});
 		});
 	}
 
@@ -93,6 +117,8 @@ export class CookieBridgeServer {
 		// 写入端口文件供浏览器扩展发现（带 PID 后缀避免多实例冲突）
 		try {
 			fs.writeFileSync(this.portFile, String(this.port), { mode: 0o600 });
+			// 同时写入通用端口文件（供浏览器扩展快速发现）
+			fs.writeFileSync(getGenericPortFilePath(), String(this.port), { mode: 0o600 });
 		} catch {
 			this.log(`无法写入端口文件: ${this.portFile}`);
 		}
@@ -202,6 +228,7 @@ export class CookieBridgeServer {
 			});
 		}
 		try { fs.unlinkSync(this.portFile); } catch { /* ignore */ }
+		try { fs.unlinkSync(getGenericPortFilePath()); } catch { /* ignore */ }
 		this.log('Cookie Bridge 已停止');
 	}
 }

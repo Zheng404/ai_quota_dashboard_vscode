@@ -74,16 +74,23 @@ ai_quota_dashboard_vscode/
 │   ├── package.json            # 扩展清单与脚本
 │   ├── tsconfig.json           # TypeScript 配置（strict 模式）
 │   └── eslint.config.mjs       # ESLint 配置
-├── chrome/                     # Chrome/Edge 浏览器扩展
+├── browser-common/             # 浏览器扩展共享代码（Chrome/Firefox 共用）
+│   ├── browser-api.js          # 浏览器 API 兼容层
+│   ├── cache.js / config.js    # 缓存与配置管理
+│   ├── popup.html / popup.js   # Popup 仪表盘
+│   ├── dashboard.html / dashboard.js # 独立 Dashboard 页面
+│   ├── templates.js            # 卡片模板
+│   ├── styles.css              # 样式表
+│   ├── api/                    # API 客户端（glm/kimi/mimo）
+│   └── scripts/
+│       └── background.js       # Service Worker（Cookie Bridge + 凭证检测）
+├── chrome/                     # Chrome/Edge 专属（仅 manifest + icons）
 │   ├── manifest.json           # Manifest V3
-│   ├── scripts/background.js   # Service Worker
-│   ├── scripts/popup.js        # 弹窗脚本
-│   ├── api/                    # 数据抓取脚本
-│   └── icons/                  # 图标资源
-├── firefox/                    # Firefox 浏览器扩展
-│   ├── manifest.json           # Manifest V3 + browser_specific_settings
-│   └── ...（结构与 chrome/ 基本一致）
-├── build.sh                    # 一键打包脚本
+│   └── icons/
+├── firefox/                    # Firefox 专属（仅 manifest + icons）
+│   ├── manifest.json           # Manifest V3 + browser_specific_settings.gecko
+│   └── icons/
+├── build.sh                    # 一键打包脚本（复制共享代码 → 打包 → 清理）
 └── .github/workflows/          # CI/CD 工作流
     ├── ci.yml                  # 持续集成
     └── release.yml             # 发版自动发布
@@ -436,20 +443,24 @@ export const dashboardStyles = `
 
 ### 本地测试加载
 
+> **注意**：`chrome/` 和 `firefox/` 目录仅包含 `manifest.json` 和 `icons/`，共享代码存放在 `browser-common/`。加载前需要先运行 `build.sh` 将共享代码复制进去，或手动复制 `browser-common/` 的文件到对应目录。
+
 #### Chrome / Edge
 
-1. 打开浏览器，进入 `chrome://extensions/`
-2. 开启右上角「开发者模式」
-3. 点击「加载已解压的扩展程序」
-4. 选择 `chrome/` 目录
-5. 扩展图标会出现在工具栏，点击 `Alt+Q` 可快速打开弹窗
+1. 在项目根目录运行 `./build.sh` 复制共享代码到 `chrome/`
+2. 打开浏览器，进入 `chrome://extensions/`
+3. 开启右上角「开发者模式」
+4. 点击「加载已解压的扩展程序」
+5. 选择 `chrome/` 目录
+6. 扩展图标会出现在工具栏，点击 `Alt+Q` 可快速打开弹窗
 
 #### Firefox
 
-1. 打开 `about:debugging#/runtime/this-firefox`
-2. 点击「临时载入附加组件」
-3. 选择 `firefox/manifest.json`
-4. 扩展会立即加载，重启浏览器后需重新加载（临时扩展特性）
+1. 在项目根目录运行 `./build.sh` 复制共享代码到 `firefox/`
+2. 打开 `about:debugging#/runtime/this-firefox`
+3. 点击「临时载入附加组件」
+4. 选择 `firefox/manifest.json`
+5. 扩展会立即加载，重启浏览器后需重新加载（临时扩展特性）
 
 ### 调试 Service Worker
 
@@ -628,13 +639,18 @@ export default defineConfig({
 #### 浏览器扩展
 
 ```bash
-# Chrome
+# Chrome（需要先将 browser-common 复制到 chrome/）
+cp -r browser-common/* chrome/
 cd chrome
-zip -r ../ai-quota-chrome.zip manifest.json popup.html dashboard.html dashboard.js api/ scripts/ icons/
+zip -r ../build/ai-quota-dashboard-chrome.zip manifest.json popup.html dashboard.html popup.js dashboard.js templates.js styles.css browser-api.js cache.js config.js api/ scripts/ icons/
 
-# Firefox
+# Firefox（需要先将 browser-common 复制到 firefox/）
+cp -r browser-common/* firefox/
 cd firefox
-zip -r ../ai-quota-firefox.zip manifest.json popup.html dashboard.html dashboard.js api/ scripts/ icons/
+zip -r ../build/ai-quota-dashboard-firefox.zip manifest.json popup.html dashboard.html popup.js dashboard.js templates.js styles.css browser-api.js cache.js config.js api/ scripts/ icons/
+
+# 清理（打包后删除复制的文件）
+# ... or just use build.sh
 ```
 
 #### 创建 VSIX
@@ -818,4 +834,4 @@ Firefox 临时加载的扩展在浏览器重启后会消失，属于正常行为
 
 ---
 
-*本文档最后更新：2026-06-02*
+*本文档最后更新：2026-06-10*

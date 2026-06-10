@@ -42,7 +42,7 @@ async function kimiPost(path, token, body = {}) {
 
 	if (!res.ok) {
 		if (res.status === 401) {
-			throw new Error('Kimi 鉴权失败：Cookie 已过期');
+			throw new Error('Kimi 认证失败：Cookie 已过期，请重新登录 Kimi');
 		}
 		throw new Error(`HTTP ${res.status}`);
 	}
@@ -82,7 +82,7 @@ function parseWindowSlot(limits) {
 	const resetsAt = detail.resetTime ? new Date(detail.resetTime).getTime() : null;
 
 	return {
-		label: `频限明细 (${windowLabel})`,
+		label: `频率限制明细 (${windowLabel})`,
 		percent: Math.min(percent, 100),
 		used,
 		limit,
@@ -121,7 +121,7 @@ function parseBalanceSlot(balances) {
 	const percent = ratio * 100;
 
 	return {
-		label: '月权益额度',
+		label: '月度权益额度',
 		percent: Math.min(percent, 100),
 		used: undefined,
 		limit: undefined,
@@ -143,7 +143,7 @@ export async function fetchKimiQuota() {
 			updatedAt: Date.now(),
 			level: '',
 			currentEndTime: '',
-			err: '未找到 kimi-auth Cookie，请先登录 Kimi',
+			err: '未获取到 Kimi 登录凭证，请先登录 Kimi 网站',
 		};
 	}
 
@@ -163,7 +163,7 @@ export async function fetchKimiQuota() {
 				updatedAt: Date.now(),
 				level: '',
 				currentEndTime: '',
-				err: 'Kimi Cookie 已过期，请重新登录',
+				err: 'Kimi 登录凭证已过期，请重新登录',
 			};
 		}
 
@@ -232,7 +232,7 @@ export async function fetchKimiQuota() {
 			updatedAt: Date.now(),
 			level: '',
 			currentEndTime: '',
-			err: err.message || '请求失败',
+			err: err.message || '请求失败，请稍后重试',
 		};
 	}
 }

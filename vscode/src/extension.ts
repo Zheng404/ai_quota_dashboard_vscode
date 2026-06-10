@@ -99,7 +99,7 @@ async function fetchSingleService(
 		return true;
 
 	} catch (err) {
-		logError(`[${profile.id}] 拉取失败`, err);
+		logError(`[${profile.id}] 数据获取失败`, err);
 		const msg = err instanceof Error ? err.message : String(err);
 		const errorData: ServiceData = {
 			id: profile.id,
@@ -168,7 +168,7 @@ async function doPullAll(bar: StatusBar, ctx: vscode.ExtensionContext): Promise<
 async function pullAll(bar: StatusBar, ctx: vscode.ExtensionContext) {
 	// AFK 检测
 	if (afkDetector.checkAfk(config.afkThreshold())) {
-		log('AFK 中，跳过刷新');
+		log('用户离开中，跳过刷新');
 		return;
 	}
 
@@ -210,7 +210,7 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 	ctx.subscriptions.push(
 		vscode.commands.registerCommand('aiQuotaDashboard.refresh', async () => {
 			if (afkDetector.checkAfk(config.afkThreshold())) {
-				vscode.window.showInformationMessage('AFK 中，跳过刷新');
+				vscode.window.showInformationMessage('用户离开中，跳过刷新');
 				return;
 			}
 			bar.setLoading();
@@ -252,8 +252,8 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			try {
 				descriptor = getDescriptor(profile.kind);
 			} catch (e) {
-				logError(`获取服务描述符失败: ${profile.kind}`, e);
-				vscode.window.showErrorMessage(`获取 ${profile.displayName} 服务描述符失败`);
+				logError(`获取服务信息失败: ${profile.kind}`, e);
+				vscode.window.showErrorMessage(`获取 ${profile.displayName} 服务信息失败`);
 				return;
 			}
 			if (!descriptor.detailProvider || !descriptor.mergeDetailData) { return; }
@@ -261,7 +261,7 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			try {
 				const detail = await descriptor.detailProvider.fetchDetail(range, key, profile.endpoint);
 				if (!detail) {
-					vscode.window.showWarningMessage(`未能拉取 ${profile.displayName} 的详情数据，请稍后重试`);
+					vscode.window.showWarningMessage(`未能获取 ${profile.displayName} 的详情数据，请稍后重试`);
 					return;
 				}
 
@@ -273,8 +273,8 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 					await updateView();
 				}
 			} catch (e) {
-				logError('拉取详情失败', e);
-				vscode.window.showErrorMessage(`拉取 ${profile.displayName} 详情失败: ${e instanceof Error ? e.message : String(e)}`);
+				logError('详情数据获取失败', e);
+				vscode.window.showErrorMessage(`${profile.displayName} 详情数据获取失败: ${e instanceof Error ? e.message : String(e)}`);
 			}
 		})
 	);
@@ -283,7 +283,7 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 	ctx.subscriptions.push(
 		vscode.commands.registerCommand('aiQuotaDashboard.resetData', async () => {
 			const confirmed = await vscode.window.showWarningMessage(
-				'确定要清除所有数据吗？此操作将删除所有服务配置、API Key 和历史记录，且不可恢复。',
+				'确定要清除所有数据吗？此操作将删除所有服务配置、API 密钥和历史记录，且不可恢复。',
 				{ modal: true },
 				'确认清除',
 			);
@@ -294,7 +294,7 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 				cache.clear();
 				serviceData.clear();
 				await updateView();
-				vscode.window.showInformationMessage('数据已重置');
+				vscode.window.showInformationMessage('所有数据已重置');
 			}
 		})
 	);
@@ -331,7 +331,7 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			if (dataSource === 'manual') {
 				await config.updateServiceKey(id, key);
 			}
-			await afterConfigChange(bar, ctx, '服务设置已保存');
+			await afterConfigChange(bar, ctx, '服务配置已保存');
 		})
 	);
 
@@ -342,7 +342,7 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const d = data as AddServicePayload;
 			const descriptors = getAllDescriptors();
 			if (descriptors.length === 0) {
-				vscode.window.showErrorMessage('没有可用的服务类型');
+				vscode.window.showErrorMessage('暂无可用的服务类型');
 				return;
 			}
 			const defaultKind = descriptors[0]?.kind ?? 'glm';
@@ -361,14 +361,14 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const id = typeof d.id === 'string' ? d.id : '';
 			if (!id) { return; }
 			const confirmed = await vscode.window.showWarningMessage(
-				'确定要删除此服务吗？',
+				'确定要移除此服务吗？',
 				{ modal: true },
 				'确认删除',
 			);
 			if (confirmed !== '确认删除') { return; }
 			await config.removeService(id);
 			serviceData.delete(id);
-			await afterConfigChange(bar, ctx, '服务已删除');
+			await afterConfigChange(bar, ctx, '服务已移除');
 		})
 	);
 }
@@ -385,7 +385,7 @@ function registerSettingsCommands(ctx: vscode.ExtensionContext, bar: StatusBar, 
 			await config.setWarnThreshold(warnThreshold);
 			await config.setAfkThreshold(afkThreshold);
 			restartTimer(loop);
-			await afterConfigChange(bar, ctx, '全局设置已保存');
+			await afterConfigChange(bar, ctx, '全局配置已保存');
 		})
 	);
 }
@@ -431,7 +431,7 @@ async function startPolling(loop: () => Promise<void>) {
 // ====== Cookie Bridge ======
 async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
 	bridge = new CookieBridgeServer(async (payload: CookiePayload) => {
-		log(`[Bridge] 收到 Cookie: ${payload.cookies?.length ?? 0} 条`);
+		log(`[Bridge] 收到 ${payload.cookies?.length ?? 0} 条 Cookie`);
 		let updated = false;
 
 		// Kimi: kimi-auth → 更新 bridge 模式的 Kimi 服务
@@ -441,7 +441,7 @@ async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
 				const oldKey = await config.getKey(p.id);
 				if (oldKey !== payload.kimiAuthToken) {
 					await config.updateServiceKey(p.id, payload.kimiAuthToken);
-					log(`[Bridge] Kimi Cookie 已更新: ${p.id}`);
+					log(`[Bridge] Kimi 凭证已更新: ${p.id}`);
 					updated = true;
 				}
 			}
@@ -454,7 +454,20 @@ async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
 				const oldKey = await config.getKey(p.id);
 				if (oldKey !== payload.mimoCookie) {
 					await config.updateServiceKey(p.id, payload.mimoCookie);
-					log(`[Bridge] MiMo Cookie 已更新: ${p.id}`);
+					log(`[Bridge] MiMo 凭证已更新: ${p.id}`);
+					updated = true;
+				}
+			}
+		}
+
+		// GLM: API Key → 更新 bridge 模式的 GLM 服务
+		if (payload.glmApiKey) {
+			const profiles = config.loadProfiles().filter(p => p.kind === 'glm' && p.dataSource === 'bridge');
+			for (const p of profiles) {
+				const oldKey = await config.getKey(p.id);
+				if (oldKey !== payload.glmApiKey) {
+					await config.updateServiceKey(p.id, payload.glmApiKey);
+					log(`[Bridge] GLM 凭证已更新: ${p.id}`);
 					updated = true;
 				}
 			}
@@ -469,7 +482,7 @@ async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
 
 	try {
 		const port = await bridge.start(37100);
-		log(`Cookie Bridge 已启动: http://127.0.0.1:${port}`);
+		log(`Cookie Bridge 已启动，监听端口: ${port}`);
 	} catch (err) {
 		logError('Cookie Bridge 启动失败', err);
 	}
@@ -494,14 +507,14 @@ export async function activate(ctx: vscode.ExtensionContext) {
 	// 定义轮询函数（供命令和轮询共用）
 	const loop = async () => {
 		if (isLoopRunning) {
-			log('上轮轮询尚未完成，跳过本次');
+			log('上轮数据刷新尚未完成，跳过本次刷新');
 			return;
 		}
 		isLoopRunning = true;
 		try {
 			await pullAll(bar, ctx);
 		} catch (err) {
-			logError('轮询异常', err);
+			logError('数据刷新异常', err);
 		} finally {
 			isLoopRunning = false;
 		}

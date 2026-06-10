@@ -29,7 +29,7 @@ export class StatusBar {
 	setRefreshing(id: string) {
 		const item = this.items.get(id);
 		if (item) {
-			item.text = `⟳ 刷新中...`;
+			item.text = `刷新中...`;
 			item.color = undefined;
 			item.show();
 		}
@@ -66,7 +66,7 @@ export class StatusBar {
 	private showEmptyItem() {
 		if (!this.emptyItem) {
 			this.emptyItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-			this.emptyItem.text = '⚙️ 未配置 AI 服务';
+			this.emptyItem.text = '未配置 AI 服务';
 			this.emptyItem.tooltip = this.buildEmptyTooltip();
 			this.emptyItem.command = 'aiQuotaDashboard.openSettings';
 		}
@@ -76,10 +76,10 @@ export class StatusBar {
 	private buildEmptyTooltip(): vscode.MarkdownString {
 		const md = new vscode.MarkdownString(undefined, true);
 		md.isTrusted = true;
-		md.appendMarkdown('### ⚙️ 未配置 AI 服务\n\n');
+		md.appendMarkdown('### 未配置 AI 服务\n\n');
 		md.appendMarkdown('请点击下方按钮添加服务，或打开设置页面。\n\n');
 		md.appendMarkdown('---\n\n');
-		md.appendMarkdown('[⚙️ 打开设置](command:aiQuotaDashboard.openSettings)');
+		md.appendMarkdown('[打开设置](command:aiQuotaDashboard.openSettings)');
 		return md;
 	}
 
@@ -188,20 +188,20 @@ export class StatusBar {
 		md.supportHtml = true;
 
 		if (d.err) {
-			md.appendMarkdown(`### ❌ ${d.name}\n\n`);
+			md.appendMarkdown(`### ${d.name}（异常）\n\n`);
 			md.appendMarkdown(`${d.err}\n\n`);
 			md.appendMarkdown(`---\n\n`);
-			md.appendMarkdown(`[🔄 刷新](command:aiQuotaDashboard.refreshService?${encodeURIComponent(JSON.stringify({ id: d.id }))})`);
+			md.appendMarkdown(`[刷新](command:aiQuotaDashboard.refreshService?${encodeURIComponent(JSON.stringify({ id: d.id }))})`);
 			md.appendMarkdown(` | `);
-			md.appendMarkdown(`[📊 打开仪表盘](command:aiQuotaDashboard.openDashboard)`);
+			md.appendMarkdown(`[仪表盘](command:aiQuotaDashboard.openDashboard)`);
 			return md;
 		}
 
 		const renderer = this.resolveRenderer(d.kind);
 		if (!renderer) {
-			md.appendMarkdown(`### ⚠️ ${d.name}\n\n`);
-			md.appendMarkdown(`服务类型 \`${d.kind}\` 未注册状态栏渲染器。请在 ServiceDescriptor 中提供 \`statusBarRenderer\`。\n\n`);
-			md.appendMarkdown(`[⚙️ 设置](command:aiQuotaDashboard.openSettings)`);
+			md.appendMarkdown(`### ${d.name}（警告）\n\n`);
+			md.appendMarkdown(`服务类型 \`${d.kind}\` 未注册状态栏渲染器，请在 ServiceDescriptor 中配置 statusBarRenderer。\n\n`);
+			md.appendMarkdown(`[设置](command:aiQuotaDashboard.openSettings)`);
 			return md;
 		}
 
@@ -223,7 +223,7 @@ export class StatusBar {
 			}
 		}
 
-		md.appendMarkdown(`最近刷新: ${new Date(d.updatedAt).toLocaleString()}\n\n`);
+		md.appendMarkdown(`最近更新: ${new Date(d.updatedAt).toLocaleString()}\n\n`);
 		md.appendMarkdown(`---\n\n`);
 
 		// 配额区域
@@ -251,11 +251,11 @@ export class StatusBar {
 
 		// 操作按钮
 		md.appendMarkdown(`---\n\n`);
-		md.appendMarkdown(`[📊 仪表盘](command:aiQuotaDashboard.openDashboard)`);
+		md.appendMarkdown(`[仪表盘](command:aiQuotaDashboard.openDashboard)`);
 		md.appendMarkdown(` | `);
-		md.appendMarkdown(`[⚙️ 设置](command:aiQuotaDashboard.openSettings)`);
+		md.appendMarkdown(`[设置](command:aiQuotaDashboard.openSettings)`);
 		md.appendMarkdown(` | `);
-		md.appendMarkdown(`[🔄 刷新](command:aiQuotaDashboard.refreshService?${encodeURIComponent(JSON.stringify({ id: d.id }))})`);
+		md.appendMarkdown(`[刷新](command:aiQuotaDashboard.refreshService?${encodeURIComponent(JSON.stringify({ id: d.id }))})`);
 
 		return md;
 	}

@@ -1,7 +1,7 @@
 import { ServiceSettingsDescriptor } from '../types';
 
 export const KIMI_SETTINGS: ServiceSettingsDescriptor = {
-	keyPlaceholder: 'kimi-auth Cookie 值',
-	keyHint: '需从 Cookie 获取 kimi-auth 值',
+	keyPlaceholder: 'kimi-auth Cookie',
+	keyHint: '需从浏览器 Cookie 中获取 kimi-auth',
 	showHelpButton: true,
 };

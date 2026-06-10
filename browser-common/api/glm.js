@@ -34,7 +34,7 @@ async function glmGet(path, token) {
 
 	if (!res.ok) {
 		if (res.status === 401) {
-			throw new Error('GLM 鉴权失败：API Key 无效');
+			throw new Error('GLM 认证失败：API Key 无效，请检查密钥是否正确');
 		}
 		throw new Error(`HTTP ${res.status}`);
 	}
@@ -78,7 +78,7 @@ function getTimeUnitLabel(unit) {
 function getGlmQuotaLabel(item) {
 	if (item.type === 'TOKENS_LIMIT') {
 		if (item.unit === 3 && item.number === 5) {
-			return '每5小时额度';
+			return '每 5 小时额度';
 		}
 		if (item.unit === 6 && item.number === 1) {
 			return '每周额度';
@@ -88,7 +88,7 @@ function getGlmQuotaLabel(item) {
 	if (item.type === 'TIME_LIMIT') {
 		return 'MCP 每月额度';
 	}
-	return '未知额度';
+	return '未知配额类型';
 }
 
 /**
@@ -248,7 +248,7 @@ export async function fetchGlmQuota() {
 			slots: [],
 			updatedAt: Date.now(),
 			level: '',
-			err: '未配置 GLM API Key，请在设置中添加',
+			err: '未配置 GLM API Key，请在设置中输入',
 		};
 	}
 
@@ -295,7 +295,7 @@ export async function fetchGlmQuota() {
 			slots: [],
 			updatedAt: Date.now(),
 			level: '',
-			err: err.message || '请求失败',
+			err: err.message || '请求失败，请稍后重试',
 		};
 	}
 }

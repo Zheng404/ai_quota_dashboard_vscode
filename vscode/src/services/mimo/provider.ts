@@ -56,7 +56,7 @@ async function mimoGet<T>(url: string, cookie: string, timeout = 15000): Promise
 		return await getJson<T>(url, headers, timeout);
 	} catch (err) {
 		if (err instanceof Error && (err.message.includes('HTTP 401') || err.message.includes('Unauthorized'))) {
-			throw new Error('MiMo 鉴权失败：请使用浏览器开发者工具中的 Cookie 值');
+			throw new Error('MiMo 认证失败：请使用浏览器开发者工具获取 Cookie 值');
 		}
 		throw err;
 	}
@@ -116,17 +116,17 @@ export const mimoProvider: QuotaProvider = {
 
 		// 检查用量接口错误
 		if (usageRes.code !== 0) {
-			throw new Error(`MiMo 用量接口错误: ${usageRes.message || usageRes.code}`);
+			throw new Error(`MiMo 用量接口返回错误: ${usageRes.message || usageRes.code}`);
 		}
 		if (!usageRes.data) {
-			throw new Error('MiMo 用量接口返回空数据');
+			throw new Error('MiMo 用量接口未返回数据');
 		}
 		// 检查详情接口错误
 		if (detailRes.code !== 0) {
-			throw new Error(`MiMo 套餐接口错误: ${detailRes.message || detailRes.code}`);
+			throw new Error(`MiMo 套餐接口返回错误: ${detailRes.message || detailRes.code}`);
 		}
 		if (!detailRes.data) {
-			throw new Error('MiMo 套餐接口返回空数据');
+			throw new Error('MiMo 套餐接口未返回数据');
 		}
 
 		// 解析配额槽位：显示套餐用量 + 补偿 Token（当 limit > 0 时自动展示）

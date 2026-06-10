@@ -51,6 +51,10 @@ function getGlmState(svcId) {
 	return glmStates[svcId];
 }
 
+export function cleanupGlmState(svcId) {
+	delete glmStates[svcId];
+}
+
 function getModelUsageForRange(data, range) {
 	if (data.modelUsageByRange && data.modelUsageByRange[range]) {
 		return data.modelUsageByRange[range];
@@ -117,7 +121,7 @@ function renderGlmHeader(data) {
 		+ `<button class="btn btn-icon btn-refresh-svc glm-refresh-btn" data-service-id="${data.id}" title="刷新"><svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M883.875 684.806c41.592-90.131 47.607-188.11 23.715-277.077-27.468-102.682-95.063-194.238-193.08-249.865l43.48-93.961-247.21 64.819 110.564 230.424 45.491-98.308c66.606 40.672 112.204 104.396 131.498 176.146 17.257 64.639 13.024 134.926-17.145 200.514-38.445 83.352-110.309 140.105-192.603 162.245a296.78 296.78 0 0 1-36.221 7.297l51.033 105.49c4.853-1.129 9.665-2.263 14.447-3.572 113.302-30.203 213.143-109.249 266.031-224.152z m-524.696 82.476c-67.595-40.598-113.886-104.87-133.367-177.273-17.252-64.64-12.985-134.967 17.145-200.48 38.447-83.386 110.31-140.141 192.605-162.28 13.646-3.651 27.541-6.275 41.587-7.957l-50.886-106.037c-6.676 1.426-13.353 2.956-19.957 4.744-113.266 30.272-213.141 109.317-266.07 224.221-41.511 90.097-47.533 188.11-23.639 277.038l0.073 0.293c27.686 103.375 96.083 195.406 195.196 250.886l-41.111 89.661 246.955-65.694-111.329-230.022-47.202 102.9z m0 0" fill="currentColor"/></svg></button>`
 		+ `</div>`
 		+ `<div class="glm-header-row glm-header-row2">`
-		+ `<span class="glm-service-name">GLM Coding Plan (CN)</span>`
+		+ `<span class="glm-service-name">GLM 编码计划 (CN)</span>`
 		+ `<span class="glm-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ renewLine
@@ -182,7 +186,7 @@ function renderGlmDetailContent(data, state) {
 }
 
 function renderGlmLoading() {
-	return '<div class="glm-loading">加载中...</div>';
+	return '<div class="glm-loading">数据加载中...</div>';
 }
 
 function renderGlmModelDetail(usage, range) {
@@ -213,7 +217,7 @@ function renderGlmModelDetail(usage, range) {
 	).join('');
 	const totalItem = `<div class="glm-summary-item">`
 		+ `<span class="glm-summary-dot" style="background:${getModelColor('Token 消耗总量')}"></span>`
-		+ `<span class="glm-summary-name">Token 总量</span>`
+		+ `<span class="glm-summary-name">Token 消耗总量</span>`
 		+ `<span class="glm-summary-value">${fmtTokens(usage.totalTokens)}</span>`
 		+ `</div>`;
 	return chart + `<div class="glm-summary-row">${totalItem}${summaryItems}</div>`;
@@ -317,7 +321,7 @@ function renderKimiHeader(data) {
 		+ `<button class="btn btn-icon btn-refresh-svc kimi-refresh-btn" data-service-id="${data.id}" title="刷新"><svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M883.875 684.806c41.592-90.131 47.607-188.11 23.715-277.077-27.468-102.682-95.063-194.238-193.08-249.865l43.48-93.961-247.21 64.819 110.564 230.424 45.491-98.308c66.606 40.672 112.204 104.396 131.498 176.146 17.257 64.639 13.024 134.926-17.145 200.514-38.445 83.352-110.309 140.105-192.603 162.245a296.78 296.78 0 0 1-36.221 7.297l51.033 105.49c4.853-1.129 9.665-2.263 14.447-3.572 113.302-30.203 213.143-109.249 266.031-224.152z m-524.696 82.476c-67.595-40.598-113.886-104.87-133.367-177.273-17.252-64.64-12.985-134.967 17.145-200.48 38.447-83.386 110.31-140.141 192.605-162.28 13.646-3.651 27.541-6.275 41.587-7.957l-50.886-106.037c-6.676 1.426-13.353 2.956-19.957 4.744-113.266 30.272-213.141 109.317-266.07 224.221-41.511 90.097-47.533 188.11-23.639 277.038l0.073 0.293c27.686 103.375 96.083 195.406 195.196 250.886l-41.111 89.661 246.955-65.694-111.329-230.022-47.202 102.9z m0 0" fill="currentColor"/></svg></button>`
 		+ `</div>`
 		+ `<div class="kimi-header-row kimi-header-row2">`
-		+ `<span class="kimi-service-name">Kimi Membership</span>`
+		+ `<span class="kimi-service-name">Kimi 会员</span>`
 		+ `<span class="kimi-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ renewLine
@@ -378,7 +382,7 @@ function renderMimoHeader(data) {
 		+ `<button class="btn btn-icon btn-refresh-svc mimo-refresh-btn" data-service-id="${data.id}" title="刷新"><svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M883.875 684.806c41.592-90.131 47.607-188.11 23.715-277.077-27.468-102.682-95.063-194.238-193.08-249.865l43.48-93.961-247.21 64.819 110.564 230.424 45.491-98.308c66.606 40.672 112.204 104.396 131.498 176.146 17.257 64.639 13.024 134.926-17.145 200.514-38.445 83.352-110.309 140.105-192.603 162.245a296.78 296.78 0 0 1-36.221 7.297l51.033 105.49c4.853-1.129 9.665-2.263 14.447-3.572 113.302-30.203 213.143-109.249 266.031-224.152z m-524.696 82.476c-67.595-40.598-113.886-104.87-133.367-177.273-17.252-64.64-12.985-134.967 17.145-200.48 38.447-83.386 110.31-140.141 192.605-162.28 13.646-3.651 27.541-6.275 41.587-7.957l-50.886-106.037c-6.676 1.426-13.353 2.956-19.957 4.744-113.266 30.272-213.141 109.317-266.07 224.221-41.511 90.097-47.533 188.11-23.639 277.038l0.073 0.293c27.686 103.375 96.083 195.406 195.196 250.886l-41.111 89.661 246.955-65.694-111.329-230.022-47.202 102.9z m0 0" fill="currentColor"/></svg></button>`
 		+ `</div>`
 		+ `<div class="mimo-header-row mimo-header-row2">`
-		+ `<span class="mimo-service-name">Xiaomi MiMo Token Plan</span>`
+		+ `<span class="mimo-service-name">小米 MiMo Token 计划</span>`
 		+ `<span class="mimo-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ expiryLine

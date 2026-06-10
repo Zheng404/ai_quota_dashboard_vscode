@@ -1,7 +1,7 @@
 import { ServiceSettingsDescriptor } from '../types';
 
 export const GLM_SETTINGS: ServiceSettingsDescriptor = {
-	keyPlaceholder: 'API Key',
+	keyPlaceholder: 'API 密钥',
 	keyHint: '',
 	showHelpButton: false,
 };

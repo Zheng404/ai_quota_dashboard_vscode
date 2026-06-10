@@ -39,26 +39,26 @@
     "commands": [
       {
         "command": "aiQuotaDashboard.refresh",
-        "title": "AI Quota Dashboard:刷新配额",
+        "title": "刷新配额数据",
         "icon": "$(refresh)"
       },
       {
         "command": "aiQuotaDashboard.openDashboard",
-        "title": "AI Quota Dashboard:打开配额面板",
+        "title": "打开配额面板",
         "icon": "$(dashboard)"
       },
       {
         "command": "aiQuotaDashboard.resetData",
-        "title": "AI Quota Dashboard:重置数据"
+        "title": "重置所有数据"
       },
       {
         "command": "aiQuotaDashboard.openSettings",
-        "title": "AI Quota Dashboard:打开设置",
+        "title": "打开设置面板",
         "icon": "$(gear)"
       },
       {
         "command": "aiQuotaDashboard.clearHistory",
-        "title": "AI Quota Dashboard:清除历史"
+        "title": "清除历史数据"
       }
     ],
     "viewsContainers": {

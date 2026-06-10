@@ -6,9 +6,9 @@
       "strict_min_version": "116.0"
     }
   },
-  "name": "AI Quota Cookie Bridge",
+  "name": "AI Quota Dashboard",
   "version": "1.0.0",
-  "description": "将浏览器中的 Kimi / MiMo 认证 Cookie 安全地转发给本地 VSCode AI Quota Dashboard 扩展",
+  "description": "AI 配额用量仪表盘 — 支持 GLM Coding Plan、Kimi Membership、Xiaomi MiMo 等服务的配额监控与 Cookie Bridge 凭证转发",
   "permissions": [
     "cookies",
     "storage",
@@ -27,7 +27,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AI Quota Dashboard"
+    "default_title": "AI Quota Dashboard — 配额监控与凭证转发"
   },
   "commands": {
     "_execute_action": {

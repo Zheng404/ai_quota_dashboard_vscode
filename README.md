@@ -1,6 +1,6 @@
 # AI Quota Dashboard
 
-> VSCode 扩展插件 + 浏览器扩展 —— AI Coding Plan 配额用量仪表盘。实时追踪 GLM Coding Plan、Kimi Membership、Xiaomi MiMo Token Plan 等 AI 服务的配额消耗情况，帮助开发者避免超额使用，合理规划 API 调用。
+> VSCode 扩展插件 + 浏览器扩展 —— AI 配额用量仪表盘。实时追踪 GLM 编码计划、Kimi 会员、小米 MiMo Token 计划等 AI 服务的配额消耗情况，帮助开发者避免超额使用，合理规划 API 调用。
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard">
@@ -51,7 +51,7 @@
 
 | 特性 | 说明 |
 |------|------|
-| 🎯 **多服务支持** | 支持 GLM Coding Plan (CN)、Kimi Membership、Xiaomi MiMo Token Plan，通过注册表模式易于扩展更多 AI 服务 |
+| 🎯 **多服务支持** | 支持 GLM 编码计划、Kimi 会员、小米 MiMo Token 计划，通过注册表模式易于扩展更多 AI 服务 |
 | 📊 **实时仪表盘** | 侧边栏 Webview 展示配额进度、用量统计、历史趋势，支持 SVG 曲线图 |
 | 📈 **状态栏监控** | 底部状态栏实时显示配额使用率、Token 用量和倒计时，颜色预警（绿/黄/红） |
 | 🌉 **按需 Cookie Bridge** | 添加服务卡片即开启凭证自动获取和转发，失效时后台自动刷新 token，无需手动干预 |
@@ -214,11 +214,11 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 | 命令 | 功能 |
 |------|------|
-| `AI Quota Dashboard: 刷新配额` | 清空缓存并重新拉取所有服务数据 |
-| `AI Quota Dashboard: 打开配额面板` | 聚焦侧边栏仪表盘 |
-| `AI Quota Dashboard: 打开设置` | 聚焦仪表盘并切换到设置标签 |
-| `AI Quota Dashboard: 清除历史` | 仅清除历史数据（保留配置和 API Key） |
-| `AI Quota Dashboard: 重置数据` | **删除所有配置、API Key、历史记录**（不可逆） |
+| `刷新配额数据` | 清空缓存并重新拉取所有服务数据 |
+| `打开配额面板` | 聚焦侧边栏仪表盘 |
+| `打开设置面板` | 聚焦仪表盘并切换到设置标签 |
+| `清除历史数据` | 仅清除历史数据（保留配置和 API Key） |
+| `重置所有数据` | **删除所有配置、API Key、历史记录**（不可逆） |
 
 ### 浏览器扩展快捷键
 
@@ -241,9 +241,9 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 | 服务 | 目录 | 鉴权方式 | 特色功能 |
 |------|------|---------|---------|
-| **GLM Coding Plan (CN)** | `vscode/src/services/glm/` | API Key (Bearer Token) | 配额卡片 + 模型/工具用量详情 + SVG 曲线图（当日/近7天/近30天） |
-| **Kimi Membership** | `vscode/src/services/kimi/` | JWT Token (浏览器 Cookie) | 配额进度条 + 子限额展示 + 会员等级 + 有效期 |
-| **Xiaomi MiMo Token Plan** | `vscode/src/services/mimo/` | Cookie (浏览器登录态) | 套餐用量统计 + 补偿 Token 额度 + 有效期展示 + 自动续费状态 |
+| **GLM 编码计划** | `vscode/src/services/glm/` | API Key (Bearer Token) | 配额卡片 + 模型/工具用量详情 + SVG 曲线图（当日/近7天/近30天） |
+| **Kimi 会员** | `vscode/src/services/kimi/` | JWT Token (浏览器 Cookie) | 配额进度条 + 子限额展示 + 会员等级 + 有效期 |
+| **小米 MiMo Token 计划** | `vscode/src/services/mimo/` | Cookie (浏览器登录态) | 套餐用量统计 + 补偿 Token 额度 + 有效期展示 + 自动续费状态 |
 
 ---
 
@@ -257,14 +257,14 @@ ai_quota_dashboard_vscode/
 │   ├── src/
 │   │   ├── extension.ts      # 扩展入口：activate/deactivate、命令注册、轮询循环
 │   │   ├── bridge/           # Cookie Bridge HTTP 服务器
-│   │   │   └── server.ts     # 本地 HTTP 服务，接收浏览器扩展推送的 Cookie
+│   │   │   └── server.ts     # 本地 HTTP 服务，接收浏览器扩展推送的 Cookie/API Key
 │   │   ├── core/             # 核心模块
 │   │   │   ├── types.ts      # 基础类型：ServiceProfile、QuotaSlot、ServiceData 等
 │   │   │   ├── config.ts     # 配置管理（globalState + Secret Storage）
 │   │   │   ├── fetch.ts      # HTTP 客户端（含指数退避重试、请求日志）
 │   │   │   ├── format.ts     # 数字格式化 (fmtNum)
 │   │   │   ├── cache.ts      # LRU 内存缓存管理器（60s TTL，最大 100 条目）
-│   │   │   ├── afk.ts        # AFK 检测器（键盘/鼠标活动监听）
+│   │   │   ├── afk.ts        # 离开检测器（键盘/鼠标活动监听）
 │   │   │   └── *.test.ts     # 单元测试
 │   │   ├── services/         # 服务层（ServiceDescriptor 注册表模式）
 │   │   │   ├── registry.ts   # 服务注册表：kind → ServiceDescriptor 映射
@@ -286,16 +286,24 @@ ai_quota_dashboard_vscode/
 │   ├── resources/            # 图标、截图等资源
 │   ├── package.json          # 扩展清单
 │   └── ...
-├── chrome/                   # Chrome / Edge 浏览器扩展（Manifest V3）
-│   ├── manifest.json
-│   ├── background.js         # Service Worker：Cookie 监控、推送逻辑
-│   ├── popup/                # 弹窗面板
-│   ├── dashboard/            # 独立 Dashboard 页面
-│   └── ...
-├── firefox/                  # Firefox 浏览器扩展（Manifest V3）
-│   ├── manifest.json
-│   └── ...（结构与 chrome/ 一致）
-├── build.sh                  # 打包脚本（VSCode + Chrome + Firefox）
+├── browser-common/           # 浏览器扩展共享代码（Chrome/Firefox 共用）
+│   ├── browser-api.js        # 浏览器 API 兼容层
+│   ├── cache.js              # 基于 storage.local 的带 TTL 缓存
+│   ├── config.js             # 集中式配置管理
+│   ├── popup.html / popup.js # Popup 仪表盘
+│   ├── dashboard.html / dashboard.js # 独立 Dashboard 页面
+│   ├── templates.js          # 卡片渲染模板
+│   ├── styles.css            # 样式表
+│   ├── api/                  # API 客户端（glm/kimi/mimo）
+│   └── scripts/
+│       └── background.js     # Service Worker（Cookie Bridge + 凭证检测）
+├── chrome/                   # Chrome/Edge 专属（仅 manifest + icons）
+│   ├── manifest.json         # Manifest V3
+│   └── icons/
+├── firefox/                  # Firefox 专属（仅 manifest + icons）
+│   ├── manifest.json         # Manifest V3 + browser_specific_settings.gecko
+│   └── icons/
+├── build.sh                  # 打包脚本（复制共享代码到 chrome/firefox → 打包 → 清理）
 └── README.md
 ```
 
@@ -306,7 +314,7 @@ ai_quota_dashboard_vscode/
 ```typescript
 interface ServiceDescriptor {
   kind: ServiceId;                    // 'glm' | 'kimi' | 'mimo' | ...
-  displayName: string;                // 'GLM Coding Plan (CN)'
+  displayName: string;                // 'GLM 编码计划'
   defaultName: string;                // 添加时的默认名称
   badgeLabel: string;
   badgeCssClass: string;
@@ -356,6 +364,12 @@ Browser Extension                        VSCode Extension
 **按需启用**：
 - 只有 Popup 中添加了对应服务的卡片，才监控该服务的 Cookie
 - 未添加卡片的服务不会触发 Cookie 推送，避免不必要的资源消耗
+- **GLM API Key 推送**：浏览器扩展在设置中手动输入的 GLM API Key 同样通过 Bridge 推送给 VSCode
+
+**端口发现**：
+- VSCode Bridge 服务器依次尝试端口 `37100` ~ `37110`，自动避开被占用的端口
+- 端口信息写入工作区临时文件 `.ai-quota-bridge-port`
+- 浏览器扩展通过 `.ai-quota-bridge-port` 文件获取当前活跃端口
 
 **凭证自动刷新**：
 - `background.js` 每 30 分钟检查一次凭证有效性
@@ -364,7 +378,7 @@ Browser Extension                        VSCode Extension
 
 **安全机制**：
 - 动态 Token 认证（每次 VSCode 启动生成随机 token）
-- PID 后缀端口文件，避免多 VSCode 实例冲突
+- 通用端口文件 `.ai-quota-bridge-port` + 端口范围 `37100`~`37110`，避免多 VSCode 实例冲突
 - Cookie 推送时过滤敏感字段（`httpOnly` / `secure` / `expirationDate`）
 - 请求体大小限制（≤ 1MB），防止 DoS
 - POST 请求 5 秒超时
@@ -394,13 +408,16 @@ background.js 每 **30 分钟** 执行一次凭证健康检查：
 
 | 组件 | 文件 | 职责 |
 |------|------|------|
-| Service Worker | `scripts/background.js` | 按需 Cookie 监控、凭证失效检测、自动刷新、防抖推送、与 VSCode 通信 |
-| Popup | `popup.html` + `popup.js` | 仪表盘弹窗，显示配额卡片、详情 Tab、设置管理 |
-| 卡片模板 | `templates.js` | GLM / Kimi / MiMo 配额卡片和 SVG 图表模板 |
-| 样式表 | `styles.css` | Popup 和卡片样式 |
-| GLM API | `api/glm.js` | GLM 配额数据拉取（API Key 认证） |
-| Kimi API | `api/kimi.js` | Kimi 配额数据拉取（Cookie 认证） |
-| MiMo API | `api/mimo.js` | MiMo 配额数据拉取（Cookie 认证） |
+| 浏览器 API 兼容层 | `browser-common/browser-api.js` | 统一 Chrome/Firefox API 差异 |
+| 缓存模块 | `browser-common/cache.js` | storage.local 带 TTL 缓存（60s） |
+| 配置管理 | `browser-common/config.js` | 集中式配置读写 |
+| Service Worker | `browser-common/scripts/background.js` | 按需 Cookie 监控、凭证失效检测、自动刷新、防抖推送、与 VSCode 通信 |
+| Popup | `browser-common/popup.html` + `popup.js` | 仪表盘弹窗，显示配额卡片、详情 Tab、设置管理 |
+| 卡片模板 | `browser-common/templates.js` | GLM / Kimi / MiMo 配额卡片和 SVG 图表模板 |
+| 样式表 | `browser-common/styles.css` | Popup 和卡片样式 |
+| GLM API | `browser-common/api/glm.js` | GLM 配额数据拉取（API Key 认证） |
+| Kimi API | `browser-common/api/kimi.js` | Kimi 配额数据拉取（Cookie 认证） |
+| MiMo API | `browser-common/api/mimo.js` | MiMo 配额数据拉取（Cookie 认证） |
 
 ### 数据流
 
@@ -485,27 +502,39 @@ npm run test:watch
 
 ### 浏览器扩展开发
 
-浏览器扩展为纯 JavaScript，**无需构建步骤**。
+浏览器扩展采用「共享代码 + 浏览器差异」架构，**无需构建步骤**。
 
 ```
-chrome/
-├── manifest.json
-├── popup.html / popup.js    # Popup 仪表盘
+browser-common/               # 共享代码（Chrome/Firefox 共用）
+├── browser-api.js            # 浏览器 API 兼容层
+├── cache.js / config.js      # 缓存与配置管理
+├── popup.html / popup.js     # Popup 仪表盘
 ├── templates.js              # 卡片模板
 ├── styles.css                # 样式表
 ├── api/                      # API 客户端
-│   ├── glm.js / kimi.js / mimo.js
 └── scripts/
-    └── background.js         # Service Worker（按需 Cookie Bridge + 凭证检测）
+    └── background.js         # Service Worker
+
+chrome/                        # Chrome 专属
+├── manifest.json
+└── icons/
+
+firefox/                       # Firefox 专属
+├── manifest.json
+└── icons/
 ```
+
+开发时直接加载 `chrome/` 或 `firefox/` 目录需要先运行 `build.sh` 将共享代码复制进去，或者直接将 `browser-common/` 的文件手动复制到对应目录。
 
 ```bash
 # Chrome / Edge
 cd chrome
-# 直接在浏览器中加载已解压的扩展（chrome://extensions/ → 开发者模式 → 加载已解压）
+# 先在项目根目录运行 ./build.sh 复制共享代码，或手动复制
+# 然后在浏览器中加载已解压的扩展（chrome://extensions/ → 开发者模式 → 加载已解压）
 
 # Firefox
 cd firefox
+# 先在项目根目录运行 ./build.sh 复制共享代码，或手动复制
 # 在 about:debugging#/runtime/this-firefox 中临时载入 manifest.json
 ```
 
@@ -551,11 +580,11 @@ build/
 
 **A**: 该服务未实现 `StatusBarRenderer` 接口。状态栏无法识别如何渲染此服务的配额信息。如需支持，请为对应服务包添加 `statusBar.ts`。
 
-### Q: GLM 提示「鉴权失败」怎么办？
+### Q: GLM 提示「认证失败」怎么办？
 
 **A**: API Key 无效或已过期。请登录 [GLM 开放平台](https://open.bigmodel.cn/) 重新生成 API Key，并在设置页更新。
 
-### Q: Kimi 提示「鉴权失败」，但 Cookie 已同步？
+### Q: Kimi 提示「认证失败」，但 Cookie 已同步？
 
 **A**: Kimi 使用的是 JWT Token（`kimi-auth` Cookie），不是 API Key。请确保浏览器扩展正确同步了 `kimi.com` 域下的 Cookie，或手动从开发者工具中获取 `kimi-auth` 的值。
 
@@ -582,8 +611,9 @@ build/
 
 **A**: 
 - 每次 VSCode 启动时会生成新的动态 Token
-- 浏览器扩展会自动通过 `/health` 端点获取最新 Token
+- 浏览器扩展会自动通过 `.ai-quota-bridge-port` 文件和 `/health` 端点获取最新 Token 和端口
 - 如仍失败，尝试在浏览器扩展弹窗中手动点击「同步」按钮
+- 检查 `.ai-quota-bridge-port` 文件是否存在于工作区根目录
 
 ### Q: 编译报错 `Cannot find module 'vscode'`？
 

@@ -4,7 +4,7 @@ import { postJson } from '../../core/fetch';
 
 export const KIMI_DEFAULT_ENDPOINT = 'https://www.kimi.com';
 
-const KIMI_AUTH_ERROR = 'Kimi 鉴权失败：请使用浏览器开发者工具中的 JWT Token（非 API Key）';
+const KIMI_AUTH_ERROR = 'Kimi 认证失败：请使用浏览器开发者工具获取 JWT Token（非 API Key）';
 
 // Kimi (Moonshot AI) 平台数据提供者
 // 使用 Connect 协议 (JSON over HTTP)
@@ -136,7 +136,7 @@ export function parseWindowSlot(limits: KimiWindowLimit[]): QuotaSlot | undefine
 	const resetsAt = limDetail.resetTime ? new Date(limDetail.resetTime).getTime() : undefined;
 
 	return {
-		label: `频限明细 (${windowLabel})`,
+		label: `频率限制明细 (${windowLabel})`,
 		percent: Math.min(percent, 100),
 		used,
 		limit,
@@ -174,7 +174,7 @@ export function parseBalanceSlot(balances: KimiSubscriptionRaw['balances']): Quo
 	const percent = ratio * 100;
 
 	return {
-		label: '月权益额度',
+		label: '月度权益额度',
 		percent: Math.min(percent, 100),
 		// API 仅返回使用率比例，不提供绝对数量
 		used: undefined,
@@ -217,7 +217,7 @@ export const kimiProvider: QuotaProvider = {
 			throw new Error(KIMI_AUTH_ERROR);
 		}
 		if (subData.code && subData.code !== 'ok') {
-			throw new Error(`Kimi API 错误: ${subData.code}`);
+			throw new Error(`Kimi 接口返回错误: ${subData.code}`);
 		}
 
 		// 2. 拉取用量统计（频限明细 + 本周用量）

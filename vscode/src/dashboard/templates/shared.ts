@@ -24,7 +24,7 @@ export function getSharedScript(): string {
 	// ====== 共享渲染器 ======
 
 	function renderNoConfig() {
-		return '<div class="empty-state"><div class="empty-icon">\\u{1F4CA}</div><p class="empty-title">暂无配额数据</p><p class="empty-hint">切换到「设置」标签添加服务</p></div>';
+		return '<div class="empty-state"><div class="empty-icon">\\u{1F4CA}</div><p class="empty-title">暂无服务数据</p><p class="empty-hint">切换到「设置」标签页添加服务</p></div>';
 	}
 
 	function renderErrorCard(data) {
@@ -58,7 +58,7 @@ export function getSharedScript(): string {
 		if (tmpl) {
 			return tmpl.renderCard(data);
 		}
-		return '<div class="service-card error"><div class="service-header"><span class="service-name">' + escapeHtml(data.name) + '</span><span class="badge badge-error">未注册</span></div><p class="error-message">服务类型 <code>' + escapeHtml(data.kind) + '</code> 暂无专用仪表盘，请在对应服务目录下注册模板。</p></div>';
+		return '<div class="service-card error"><div class="service-header"><span class="service-name">' + escapeHtml(data.name) + '</span><span class="badge badge-error">未注册</span></div><p class="error-message">服务类型 <code>' + escapeHtml(data.kind) + '</code> 暂无专用仪表盘，请在服务目录中注册模板。</p></div>';
 	}
 	`;
 }

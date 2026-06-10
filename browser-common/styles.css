@@ -5,7 +5,11 @@
  */
 
 /* ===== 基础 ===== */
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
 
 body {
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -67,7 +71,10 @@ h1 {
 	font-weight: 500;
 }
 
-.tab-btn:hover { color: #374151; }
+.tab-btn:hover, .sub-tab-btn:hover, .glm-main-tab:hover {
+	color: #374151;
+}
+
 .tab-btn.active {
 	color: #7c3aed;
 	border-bottom-color: #7c3aed;
@@ -93,17 +100,27 @@ h1 {
 	transition: all 0.2s;
 }
 
-.sub-tab-btn:hover { color: #374151; }
 .sub-tab-btn.active {
 	color: #7c3aed;
 	border-bottom-color: #7c3aed;
 	font-weight: 500;
 }
 
-.tab-panel { display: none; }
-.tab-panel.active { display: block; }
-.sub-tab-panel { display: none; }
-.sub-tab-panel.active { display: block; }
+.tab-panel {
+	display: none;
+}
+
+.sub-tab-panel {
+	display: none;
+}
+
+.tab-panel.active {
+	display: block;
+}
+
+.sub-tab-panel.active {
+	display: block;
+}
 
 /* ===== 按钮 ===== */
 .btn {
@@ -124,15 +141,25 @@ h1 {
 	background: #7c3aed;
 	color: #fff;
 }
-.btn-primary:hover { background: #6d28d9; }
-.btn-primary:disabled { background: #d1d5db; cursor: not-allowed; }
+
+.btn-primary:hover {
+	background: #6d28d9;
+}
+
+.btn-primary:disabled {
+	background: #d1d5db;
+	cursor: not-allowed;
+}
 
 .btn-secondary {
 	background: #fff;
 	color: #7c3aed;
 	border: 1px solid #e5e7eb;
 }
-.btn-secondary:hover { background: #f9fafb; }
+
+.btn-secondary:hover {
+	background: #f9fafb;
+}
 
 .btn-icon {
 	padding: 4px 8px;
@@ -144,7 +171,10 @@ h1 {
 	font-size: 14px;
 	line-height: 1;
 }
-.btn-icon:hover { background: #f3f4f6; }
+
+.btn-icon:hover {
+	background: #f3f4f6;
+}
 
 .btn-refresh-svc {
 	padding: 2px 6px;
@@ -158,7 +188,10 @@ h1 {
 	color: white;
 	border-color: #ef4444;
 }
-.btn-danger:hover { opacity: 0.85; }
+
+.btn-danger:hover {
+	opacity: 0.85;
+}
 
 .btn-sm {
 	padding: 4px 10px;
@@ -174,7 +207,10 @@ h1 {
 	padding: 0;
 	text-decoration: underline;
 }
-.btn-link:hover { color: #6d28d9; }
+
+.btn-link:hover {
+	color: #6d28d9;
+}
 
 /* ===== 通用卡片 ===== */
 .service-card {
@@ -185,6 +221,18 @@ h1 {
 	margin-bottom: 16px;
 	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
+
+/* ===== GLM 卡片 ===== */
+.glm-card {
+	background: #fff;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	overflow: hidden;
+	margin-bottom: 16px;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+
 
 .service-card.error {
 	border-color: #fecaca;
@@ -199,13 +247,13 @@ h1 {
 	gap: 6px;
 }
 
-.service-name {
+.service-name, .glm-user-name, .kimi-user-name, .mimo-user-name {
 	font-size: 14px;
 	font-weight: 600;
 	color: #1f2937;
 }
 
-.update-time {
+.update-time, .glm-update-time, .kimi-update-time, .mimo-update-time {
 	font-size: 10px;
 	color: #9ca3af;
 	margin-left: auto;
@@ -243,65 +291,47 @@ h1 {
 	transition: width 0.3s ease;
 }
 
-.progress-fill.success { background: #22c55e; }
-.progress-fill.warning { background: #f59e0b; }
-.progress-fill.danger { background: #ef4444; }
-
-/* ===== GLM 卡片 ===== */
-.glm-card {
-	background: #fff;
-	border: 1px solid #e5e7eb;
-	border-radius: 8px;
-	overflow: hidden;
-	margin-bottom: 16px;
-	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+.progress-fill.success {
+	background: #22c55e;
 }
 
-.glm-header {
+.progress-fill.warning {
+	background: #f59e0b;
+}
+
+.progress-fill.danger {
+	background: #ef4444;
+}
+
+.glm-header, .kimi-header, .mimo-header {
 	padding: 12px 14px;
 	border-bottom: 1px solid #e5e7eb;
 }
 
-.glm-header-row {
+.glm-header-row, .kimi-header-row, .mimo-header-row {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
 	gap: 8px;
 }
 
-.glm-header-row2 { margin-top: 4px; }
-.glm-header-row3 { margin-top: 4px; }
+.glm-header-row2, .glm-header-row3, .kimi-header-row2, .kimi-header-row3, .mimo-header-row2, .mimo-header-row3 {
+	margin-top: 4px;
+}
 
-.glm-header-left {
+.glm-header-left, .kimi-header-left, .mimo-header-left {
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	flex-wrap: wrap;
 }
 
-.glm-user-name {
-	font-size: 14px;
-	font-weight: 600;
-	color: #1f2937;
-}
-
-.glm-service-name {
+.glm-service-name, .glm-renew-label, .kimi-service-name, .kimi-renew-label, .mimo-service-name, .mimo-expiry-label {
 	font-size: 11px;
 	color: #6b7280;
 }
 
-.glm-update-time {
-	font-size: 10px;
-	color: #9ca3af;
-	margin-left: auto;
-}
-
-.glm-renew-label {
-	font-size: 11px;
-	color: #6b7280;
-}
-
-.glm-renew-time {
+.glm-renew-time, .kimi-renew-time, .mimo-expiry-time {
 	font-size: 11px;
 	color: #374151;
 	font-weight: 500;
@@ -322,46 +352,46 @@ h1 {
 	border-bottom: 1px solid #e5e7eb;
 }
 
-.glm-quota-cards {
+.glm-quota-cards, .kimi-quota-cards, .mimo-quota-cards {
 	padding: 0 14px;
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
 }
 
-.glm-quota-card {
+.glm-quota-card, .kimi-quota-card, .mimo-quota-card {
 	background: #f9fafb;
 	border: 1px solid #e5e7eb;
 	border-radius: 6px;
 	padding: 10px 12px;
 }
 
-.glm-quota-header {
+.glm-quota-header, .kimi-quota-header, .mimo-quota-header, .service-item-card .svc-row {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
 	margin-bottom: 8px;
 }
 
-.glm-quota-label {
+.glm-quota-label, .kimi-quota-label, .mimo-quota-label {
 	font-size: 12px;
 	color: #374151;
 }
 
-.glm-quota-percent {
+.glm-quota-percent, .kimi-quota-percent, .mimo-quota-percent {
 	font-size: 16px;
 	font-weight: 700;
 	color: #1f2937;
 }
 
-.glm-quota-used {
+.glm-quota-used, .kimi-quota-used, .mimo-quota-used {
 	font-size: 11px;
 	font-weight: 400;
 	color: #9ca3af;
 	margin-left: 4px;
 }
 
-.glm-progress {
+.glm-progress, .kimi-progress, .mimo-progress {
 	height: 4px;
 	margin-bottom: 6px;
 }
@@ -372,14 +402,14 @@ h1 {
 	margin-top: 4px;
 }
 
-.glm-quota-reset {
+.glm-quota-reset, .kimi-quota-reset {
 	font-size: 10px;
 	color: #9ca3af;
 	margin-top: 2px;
 }
 
 /* GLM 详情区域 */
-.glm-detail-section {
+.glm-detail-section, .kimi-quota-section, .mimo-quota-section {
 	padding: 12px 0;
 }
 
@@ -404,7 +434,6 @@ h1 {
 	transition: all 0.2s;
 }
 
-.glm-main-tab:hover { color: #374151; }
 .glm-main-tab.active {
 	color: #1f2937;
 	border-bottom-color: #4A90D9;
@@ -503,66 +532,6 @@ h1 {
 	height: 100%;
 }
 
-/* ===== Kimi 卡片 ===== */
-.kimi-card {
-	background: #fff;
-	border: 1px solid #e5e7eb;
-	border-radius: 8px;
-	overflow: hidden;
-	margin-bottom: 16px;
-	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-
-.kimi-header {
-	padding: 12px 14px;
-	border-bottom: 1px solid #e5e7eb;
-}
-
-.kimi-header-row {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	gap: 8px;
-}
-
-.kimi-header-row2 { margin-top: 4px; }
-.kimi-header-row3 { margin-top: 4px; }
-
-.kimi-header-left {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	flex-wrap: wrap;
-}
-
-.kimi-user-name {
-	font-size: 14px;
-	font-weight: 600;
-	color: #1f2937;
-}
-
-.kimi-service-name {
-	font-size: 11px;
-	color: #6b7280;
-}
-
-.kimi-update-time {
-	font-size: 10px;
-	color: #9ca3af;
-	margin-left: auto;
-}
-
-.kimi-renew-label {
-	font-size: 11px;
-	color: #6b7280;
-}
-
-.kimi-renew-time {
-	font-size: 11px;
-	color: #374151;
-	font-weight: 500;
-}
-
 .kimi-level-badge {
 	background: linear-gradient(135deg, #9B59B6, #8E44AD);
 	color: #fff;
@@ -573,120 +542,6 @@ h1 {
 	letter-spacing: 0.5px;
 }
 
-.kimi-quota-section {
-	padding: 12px 0;
-}
-
-.kimi-quota-cards {
-	padding: 0 14px;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-
-.kimi-quota-card {
-	background: #f9fafb;
-	border: 1px solid #e5e7eb;
-	border-radius: 6px;
-	padding: 10px 12px;
-}
-
-.kimi-quota-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 8px;
-}
-
-.kimi-quota-label {
-	font-size: 12px;
-	color: #374151;
-}
-
-.kimi-quota-percent {
-	font-size: 16px;
-	font-weight: 700;
-	color: #1f2937;
-}
-
-.kimi-quota-used {
-	font-size: 11px;
-	font-weight: 400;
-	color: #9ca3af;
-	margin-left: 4px;
-}
-
-.kimi-progress {
-	height: 4px;
-	margin-bottom: 6px;
-}
-
-.kimi-quota-reset {
-	font-size: 10px;
-	color: #9ca3af;
-	margin-top: 2px;
-}
-
-/* ===== MiMo 卡片 ===== */
-.mimo-card {
-	background: #fff;
-	border: 1px solid #e5e7eb;
-	border-radius: 8px;
-	overflow: hidden;
-	margin-bottom: 16px;
-	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-}
-
-.mimo-header {
-	padding: 12px 14px;
-	border-bottom: 1px solid #e5e7eb;
-}
-
-.mimo-header-row {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	gap: 8px;
-}
-
-.mimo-header-row2 { margin-top: 4px; }
-.mimo-header-row3 { margin-top: 4px; }
-
-.mimo-header-left {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	flex-wrap: wrap;
-}
-
-.mimo-user-name {
-	font-size: 14px;
-	font-weight: 600;
-	color: #1f2937;
-}
-
-.mimo-service-name {
-	font-size: 11px;
-	color: #6b7280;
-}
-
-.mimo-update-time {
-	font-size: 10px;
-	color: #9ca3af;
-	margin-left: auto;
-}
-
-.mimo-expiry-label {
-	font-size: 11px;
-	color: #6b7280;
-}
-
-.mimo-expiry-time {
-	font-size: 11px;
-	color: #374151;
-	font-weight: 500;
-}
-
 .mimo-plan-badge {
 	background: linear-gradient(135deg, #D4A853, #C49A43);
 	color: #fff;
@@ -695,54 +550,6 @@ h1 {
 	padding: 1px 6px;
 	border-radius: 10px;
 	letter-spacing: 0.5px;
-}
-
-.mimo-quota-section {
-	padding: 12px 0;
-}
-
-.mimo-quota-cards {
-	padding: 0 14px;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-
-.mimo-quota-card {
-	background: #f9fafb;
-	border: 1px solid #e5e7eb;
-	border-radius: 6px;
-	padding: 10px 12px;
-}
-
-.mimo-quota-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 8px;
-}
-
-.mimo-quota-label {
-	font-size: 12px;
-	color: #374151;
-}
-
-.mimo-quota-percent {
-	font-size: 16px;
-	font-weight: 700;
-	color: #1f2937;
-}
-
-.mimo-quota-used {
-	font-size: 11px;
-	font-weight: 400;
-	color: #9ca3af;
-	margin-left: 4px;
-}
-
-.mimo-progress {
-	height: 4px;
-	margin-bottom: 6px;
 }
 
 .mimo-quota-detail {
@@ -816,13 +623,6 @@ h1 {
 	margin-bottom: 10px;
 }
 
-.service-item-card .svc-row {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 8px;
-}
-
 .service-item-card .svc-name {
 	font-weight: 500;
 	color: #1f2937;
@@ -887,8 +687,13 @@ h1 {
 
 /* ===== 动画 ===== */
 @keyframes spin {
-	from { transform: rotate(0deg); }
-	to { transform: rotate(360deg); }
+	from { transform: rotate(0deg);
+}
+
+to {
+	transform: rotate(360deg);
+}
+
 }
 
 .spin {
@@ -898,28 +703,26 @@ h1 {
 
 /* ===== 响应式 ===== */
 @media (max-width: 480px) {
-	.container {
-		padding: 16px 12px;
-	}
+	.container { padding: 16px 12px;
+}
 
-	h1 {
-		font-size: 16px;
-	}
+h1 {
+	font-size: 16px;
+}
 
-	.header-actions {
-		flex-wrap: wrap;
-	}
+.header-actions {
+	flex-wrap: wrap;
+}
 
-	.glm-summary-row,
+.glm-summary-row,
 	.kimi-summary-row,
 	.mimo-summary-row {
-		gap: 6px;
-	}
+	gap: 6px;
+}
 
-	.glm-summary-item,
+.glm-summary-item,
 	.kimi-summary-item,
 	.mimo-summary-item {
-		padding: 4px 6px;
-		font-size: 10px;
-	}
+	padding: 4px 6px;
+	font-size: 10px;
 }

@@ -8,7 +8,9 @@
 import { fetchGlmQuota, fetchGlmDetail } from './api/glm.js';
 import { fetchKimiQuota } from './api/kimi.js';
 import { fetchMimoQuota } from './api/mimo.js';
-import { renderService, switchGlmMainTab, switchGlmSubTab, mergeGlmDetailData, fmtDateTime, escapeHtml } from './templates.js';
+import { renderService, switchGlmMainTab, switchGlmSubTab, mergeGlmDetailData, cleanupGlmState, fmtDateTime, escapeHtml } from './templates.js';
+import { config, loadConfig, saveConfig } from './config.js';
+import { getCached, setCached } from './cache.js';
 
 // ===== 常量 =====
 
@@ -22,18 +24,18 @@ const SERVICE_FETCHERS = {
 };
 
 const SERVICE_LABELS = {
-	glm: 'GLM Coding Plan',
-	kimi: 'Kimi Membership',
-	mimo: 'Xiaomi MiMo',
+	glm: 'GLM 编码计划',
+	kimi: 'Kimi 会员',
+	mimo: '小米 MiMo',
 };
 
 /** 需要 Cookie Bridge 的服务（凭证来自浏览器） */
 const BRIDGE_KINDS = new Set(['glm', 'kimi', 'mimo']);
 
 const SERVICE_KINDS = [
-	{ kind: 'glm', label: 'GLM Coding Plan', desc: 'Cookie Bridge 转发 API Key' },
-	{ kind: 'kimi', label: 'Kimi Membership', desc: 'Cookie Bridge 转发凭证' },
-	{ kind: 'mimo', label: 'Xiaomi MiMo', desc: 'Cookie Bridge 转发凭证' },
+	{ kind: 'glm', label: 'GLM 编码计划', desc: 'Cookie Bridge 转发 API Key' },
+	{ kind: 'kimi', label: 'Kimi 会员', desc: 'Cookie Bridge 转发凭证' },
+	{ kind: 'mimo', label: '小米 MiMo', desc: 'Cookie Bridge 转发凭证' },
 ];
 
 // ===== DOM 元素 =====
@@ -57,14 +59,7 @@ let bridgeStatus = {
 	connected: false,
 	activeKinds: [],
 };
-let config = {
-	services: [],
-	glmApiKey: '',
-	settings: {
-		refreshInterval: 600,
-		warnThreshold: 0.8,
-	},
-};
+// config 从 config.js 导入
 
 let currentTab = 'dashboard';
 let currentSubTab = 'services';
@@ -101,60 +96,7 @@ async function notifyConfigUpdated() {
 	}
 }
 
-// ===== 配置管理 =====
-
-async function loadConfig() {
-	try {
-		const stored = await chrome.storage.local.get(['dashboardConfig', 'glmApiKey']);
-		if (stored.dashboardConfig) {
-			config = { ...config, ...stored.dashboardConfig };
-		}
-		if (stored.glmApiKey) {
-			config.glmApiKey = stored.glmApiKey;
-		}
-		if (!Array.isArray(config.services)) {
-			config.services = [];
-		}
-	} catch (err) {
-		console.error('[Dashboard] 加载配置失败:', err);
-	}
-}
-
-async function saveConfig() {
-	try {
-		await chrome.storage.local.set({
-			dashboardConfig: config,
-			glmApiKey: config.glmApiKey,
-		});
-	} catch (err) {
-		console.error('[Dashboard] 保存配置失败:', err);
-	}
-}
-
-// ===== 缓存 =====
-
-async function getCached(serviceId) {
-	try {
-		const result = await chrome.storage.local.get(`quotaCache_${serviceId}`);
-		const entry = result[`quotaCache_${serviceId}`];
-		if (!entry) return null;
-		const age = Date.now() - entry.timestamp;
-		if (age > CACHE_TTL_MS) return null;
-		return entry.data;
-	} catch {
-		return null;
-	}
-}
-
-async function setCached(serviceId, data) {
-	try {
-		await chrome.storage.local.set({
-			[`quotaCache_${serviceId}`]: { data, timestamp: Date.now() },
-		});
-	} catch {
-		// ignore
-	}
-}
+// 配置管理和缓存函数从 config.js / cache.js 导入
 
 // ===== 数据加载 =====
 
@@ -186,7 +128,7 @@ async function loadService(serviceConfig, force = false) {
 			kind,
 			slots: [],
 			updatedAt: Date.now(),
-			err: `未知的服务类型: ${kind}`,
+			err: `不支持的服务类型: ${kind}`,
 		};
 	}
 
@@ -222,7 +164,7 @@ async function loadService(serviceConfig, force = false) {
 					? (bridgeState.isVscodeConnected ? 'connected' : 'active')
 					: 'inactive')
 				: undefined,
-			err: err.message || '加载失败',
+			err: err.message || '加载失败，请检查网络连接后重试',
 		};
 	}
 }
@@ -232,7 +174,7 @@ async function loadAll(force = false) {
 	isLoading = true;
 
 	refreshBtn.disabled = true;
-	refreshBtn.innerHTML = '<span class="spin">🔄</span>';
+	refreshBtn.innerHTML = '<span class="spin">刷新</span>';
 
 	try {
 		if (config.glmApiKey) {
@@ -249,7 +191,7 @@ async function loadAll(force = false) {
 			servicesEl.innerHTML = `
 				<div class="empty-state">
 					<div class="empty-icon">📊</div>
-					<p class="empty-title">暂无服务</p>
+					<p class="empty-title">暂无服务数据</p>
 					<p class="empty-hint">切换到「设置」标签添加服务</p>
 					<p class="empty-hint" style="margin-top: 8px; font-size: 11px;">
 						添加 Kimi / MiMo 卡片后自动开启 Cookie Bridge
@@ -259,7 +201,7 @@ async function loadAll(force = false) {
 		}
 
 		if (force || serviceDataMap.size === 0) {
-			servicesEl.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+			servicesEl.innerHTML = '<div class="empty-state"><p>数据加载中...</p></div>';
 		}
 
 		const tasks = enabledServices.map(svc => loadService(svc, force));
@@ -277,13 +219,13 @@ async function loadAll(force = false) {
 		servicesEl.innerHTML = `
 			<div class="empty-state">
 				<div class="empty-icon">⚠️</div>
-				<p class="empty-title">加载失败</p>
-				<p class="empty-hint">${escapeHtml(err.message || '未知错误')}</p>
-				<p class="empty-hint" style="margin-top: 4px; font-size: 11px;">点击刷新按钮重试</p>
+				<p class="empty-title">加载失败，请检查网络连接后重试</p>
+				<p class="empty-hint">${escapeHtml(err.message || '加载失败，请检查网络连接后重试')}</p>
+				<p class="empty-hint" style="margin-top: 4px; font-size: 11px;">点击刷新按钮重新加载</p>
 			</div>`;
 	} finally {
 		refreshBtn.disabled = false;
-		refreshBtn.innerHTML = '🔄';
+		refreshBtn.innerHTML = '刷新';
 		isLoading = false;
 	}
 }
@@ -312,7 +254,7 @@ function renderDashboard() {
 		servicesEl.innerHTML = `
 			<div class="empty-state">
 				<div class="empty-icon">📊</div>
-				<p class="empty-title">暂无服务</p>
+				<p class="empty-title">暂无服务数据</p>
 				<p class="empty-hint">切换到「设置」标签添加服务</p>
 				<p class="empty-hint" style="margin-top: 8px; font-size: 11px;">
 					添加 Kimi / MiMo 卡片后自动开启 Cookie Bridge
@@ -330,7 +272,7 @@ function renderDashboard() {
 	}
 
 	if (!html) {
-		html = '<div class="empty-state"><p>加载中...</p></div>';
+		html = '<div class="empty-state"><p>数据加载中...</p></div>';
 	}
 
 	servicesEl.innerHTML = html;
@@ -383,10 +325,10 @@ function renderSettingsServices() {
 			</div>`;
 	}
 
-	html += '<h3>已添加服务</h3>';
+	html += '<h3>已配置服务</h3>';
 
 	if (config.services.length === 0) {
-		html += '<p style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">暂无服务，请从下方添加</p>';
+		html += '<p style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">暂无服务配置，请从下方添加</p>';
 	} else {
 		for (const svc of config.services) {
 			const isGlm = svc.kind === 'glm';
@@ -409,13 +351,13 @@ function renderSettingsServices() {
 						<p class="form-hint">
 							${isGlm ? 'API Key 通过 Cookie Bridge 转发给 VSCode' : '从浏览器自动获取 Cookie'}
 							${bridgeActive
-								? (bridgeStatus.connected ? ' — ✅ 已转发给 VSCode' : ' — ⏳ 等待 VSCode 连接')
-								: ' — 🔧 Bridge 未激活'}
+								? (bridgeStatus.connected ? ' — 已转发至 VSCode' : ' — 等待 VSCode 连接')
+								: ' — 桥接未激活'}
 						</p>
 					</div>
 					<div class="svc-actions">
-						<button class="btn btn-sm btn-primary save-svc-btn" data-service-id="${svc.id}">保存</button>
-						<button class="btn btn-sm btn-danger remove-svc-btn" data-service-id="${svc.id}">删除</button>
+						<button class="btn btn-sm btn-primary save-svc-btn" data-service-id="${svc.id}">保存配置</button>
+						<button class="btn btn-sm btn-danger remove-svc-btn" data-service-id="${svc.id}">删除服务</button>
 					</div>
 				</div>`;
 		}
@@ -423,7 +365,7 @@ function renderSettingsServices() {
 
 	// 添加服务区域
 	html += '<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">';
-	html += '<h4 style="font-size: 13px; margin-bottom: 10px;">添加服务</h4>';
+	html += '<h4 style="font-size: 13px; margin-bottom: 10px;">添加新服务</h4>';
 	html += '<div style="display: flex; flex-direction: column; gap: 8px;">';
 
 	const existingKinds = new Set(config.services.map(s => s.kind));
@@ -505,7 +447,7 @@ function handleSubTabSwitch(e) {
 	subTabPanels.forEach(panel => panel.classList.toggle('active', panel.id === `subpanel-${subtab}`));
 }
 
-async function handleGlmMainTabClick(e) {
+function handleGlmMainTabClick(e) {
 	if (!e.target.classList.contains('glm-main-tab')) return;
 	const svcId = e.target.dataset.svcId;
 	const tab = e.target.dataset.tab;
@@ -514,7 +456,7 @@ async function handleGlmMainTabClick(e) {
 	}
 }
 
-async function handleGlmSubTabClick(e) {
+function handleGlmSubTabClick(e) {
 	if (!e.target.classList.contains('glm-sub-tab')) return;
 	const svcId = e.target.dataset.svcId;
 	const range = e.target.dataset.range;
@@ -556,7 +498,7 @@ async function handleSaveService(e) {
 	await notifyConfigUpdated();
 
 	btn.textContent = '已保存';
-	setTimeout(() => btn.textContent = '保存', 1500);
+	setTimeout(() => btn.textContent = '保存配置', 1500);
 
 	if (svc.kind === 'glm' && config.glmApiKey) {
 		await refreshSingleService(serviceId);
@@ -579,6 +521,11 @@ async function handleRemoveService(e) {
 	await saveConfig();
 	await notifyConfigUpdated();
 	serviceDataMap.delete(serviceId);
+
+	// 清理 GLM 状态（防止内存泄漏）
+	if (svc.kind === 'glm') {
+		cleanupGlmState(svc.id);
+	}
 
 	// 重新检测 Bridge 状态后刷新 UI
 	await checkBridgeStatus();
@@ -691,7 +638,7 @@ async function init() {
 			<div class="empty-state">
 				<div class="empty-icon">⚠️</div>
 				<p class="empty-title">初始化失败</p>
-				<p class="empty-hint">${escapeHtml(err.message || '未知错误')}</p>
+				<p class="empty-hint">${escapeHtml(err.message || '加载失败，请检查网络连接后重试')}</p>
 				<p class="empty-hint" style="margin-top: 4px; font-size: 11px;">请重新打开 Popup</p>
 			</div>`;
 	}

@@ -2,6 +2,31 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 重构 (Changed)
+
+- **浏览器扩展代码统一**：将 Chrome/Firefox 重复代码合并为 `browser-common/` 共享目录
+  - 新增 `browser-api.js`（浏览器 API 兼容层）、`cache.js`（storage.local 缓存）、`config.js`（配置管理）
+  - Chrome/Firefox 目录仅保留 `manifest.json` 和 `icons/`
+  - `build.sh` 改为「复制 → 打包 → 清理」三段式流程
+
+### 新增 (Added)
+
+- **GLM Cookie Bridge 支持**：GLM 服务现可通过浏览器扩展自动推送 API Key，与 Kimi/MiMo 一致
+- **Bridge 端口发现增强**：预定义 fallback 端口列表 `[37100..37110]`，新增通用端口文件 `.ai-quota-bridge-port`
+
+### 改进 (Changed)
+
+- **UI 文本中文化**：服务名称、命令标题、状态栏文本、Tooltip 全面中文化
+  - "GLM Coding Plan (CN)" → "GLM 编码计划"
+  - "Kimi Membership" → "Kimi 会员"
+  - "Xiaomi MiMo Token Plan" → "小米 MiMo Token 计划"
+  - 命令标题去除 "AI Quota Dashboard:" 前缀
+- **状态栏/Tooltip 清理**：移除所有 emoji 和特殊字符，改用中文括号标注
+- **术语统一**："鉴权" → "认证"，"频限明细" → "频率限制明细"，"月权益额度" → "月度权益额度"，"Token 总量" → "Token 消耗总量"
+- **错误信息优化**：三个服务 Provider 的错误提示更具体友好
+
 ## [0.3.0] - 2026-06-02
 
 ### 新增 (Added)

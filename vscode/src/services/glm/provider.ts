@@ -373,7 +373,7 @@ export const glmProvider: QuotaProvider = {
 		]);
 
 		if (quotaRaw.code !== 200 || !quotaRaw.success) {
-			throw new Error(quotaRaw.msg || '配额查询失败');
+			throw new Error(quotaRaw.msg || '配额查询失败，请检查 API Key 是否有效');
 		}
 
 		const { slots, level } = parseLimits(quotaRaw.data ?? { limits: [] });
