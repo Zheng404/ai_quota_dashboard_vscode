@@ -485,9 +485,9 @@ export const dashboardStyles = `
 | **Manifest** | 标准 V3 | V3 + `browser_specific_settings.gecko` |
 | **扩展 ID** | 自动生成 | 需在 manifest 中显式声明 `id` |
 | **Background** | `service_worker` | `scripts`（数组） |
-| **Cookie API** | `chrome.cookies` | `browser.cookies`（已兼容） |
+| **Cookie API** | `chrome.cookies` | `chrome.cookies（Firefox 内置兼容）` |
 | **最小版本** | Chrome 88+ | Firefox 116+ |
-| **持久化** | Service Worker 非持久 | 事件页面，行为略有差异 |
+| **持久性** | Service Worker 非持久 | 事件页面 |
 
 **代码兼容性**：项目中使用 `const api = typeof browser !== 'undefined' ? browser : chrome;` 做 API 兼容（如已封装）。
 
@@ -623,16 +623,17 @@ export default defineConfig({
 
 # 输出：
 # build/
-# ├── ai-quota-cookie-bridge-chrome-v1.0.0.zip
-# ├── ai-quota-cookie-bridge-firefox-v1.0.0.zip
+# ├── ai-quota-dashboard-chrome-v1.0.0.zip
+# ├── ai-quota-dashboard-firefox-v1.0.0.zip
 # └── ai-quota-dashboard-x.x.x.vsix
 ```
 
 **脚本逻辑**：
 1. 清理 `build/` 目录
-2. 打包 Chrome 扩展（zip）
-3. 打包 Firefox 扩展（zip）
-4. 检查 `vsce` 是否安装，如已安装则打包 VSIX
+2. 将 `browser-common/*` 复制到 `chrome/` 和 `firefox/`
+3. 分别打 zip 包（`ai-quota-dashboard-chrome-v1.0.0.zip` / `ai-quota-dashboard-firefox-v1.0.0.zip`）
+4. 清理阶段：从 `chrome/` 和 `firefox/` 中删除复制进来的文件，仅保留 `manifest.json` 和 `icons/`
+5. 检查 `vsce` 是否安装，如已安装则打包 VSCode 扩展
 
 ### 手动打包
 

@@ -55,7 +55,7 @@
 | 📊 **实时仪表盘** | 侧边栏 Webview 展示配额进度、用量统计、历史趋势，支持 SVG 曲线图 |
 | 📈 **状态栏监控** | 底部状态栏实时显示配额使用率、Token 用量和倒计时，颜色预警（绿/黄/红） |
 | 🌉 **按需 Cookie Bridge** | 添加服务卡片即开启凭证自动获取和转发，失效时后台自动刷新 token，无需手动干预 |
-| 🔐 **双模式认证** | 支持「手动输入 Token」和「浏览器扩展自动同步」两种鉴权方式 |
+| 🔐 **双模式认证** | 支持「手动输入 Token」和「浏览器扩展自动同步」两种认证方式 |
 | 💤 **智能 AFK 检测** | 用户长时间无操作后自动暂停刷新，节省系统资源和 API 调用次数 |
 | ⚡ **高性能缓存** | LRU 内存缓存（60s TTL）+ AsyncQueue 并发控制，避免重复请求和竞态条件 |
 | 🔒 **数据本地存储** | 所有配额数据存储在本地 globalState / Secret Storage，**不上传任何云端** |
@@ -171,13 +171,13 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 ### 方式一：浏览器扩展自动同步（推荐）
 
-适合 **Kimi** 和 **MiMo** 等基于浏览器 Cookie 鉴权的服务。
+适合 **Kimi** 和 **MiMo** 等基于浏览器 Cookie 认证的服务。
 
 1. **安装 VSCode 扩展** 和 **浏览器扩展**（见上方安装步骤）
 2. 点击浏览器扩展图标打开 **Popup** 面板
 3. 切换到 **「设置」** 标签，添加需要的服务：
    - **Kimi / MiMo**：凭证自动从浏览器 Cookie 获取，添加卡片即开启该服务的 Cookie Bridge
-   - **GLM**：在设置中手动输入 API Key（GLM 使用 API Key 鉴权，无需 Cookie Bridge）
+   - **GLM**：在设置中手动输入 API Key（GLM 使用 API Key 认证，无需 Cookie Bridge）
 4. 返回 **「仪表盘」** 查看实时配额状态
 5. 浏览器扩展会自动检测凭证有效性，失效时后台自动刷新，无需手动干预
 
@@ -187,7 +187,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 ### 方式二：手动输入 Token
 
-适合所有服务类型，特别是 **GLM** 等使用 API Key 鉴权的服务。
+适合所有服务类型，特别是 **GLM** 等使用 API Key 认证的服务。
 
 1. 安装 **VSCode 扩展**
 2. 打开仪表盘，切换到 **「设置」** 标签
@@ -239,7 +239,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 ### 支持的服务
 
-| 服务 | 目录 | 鉴权方式 | 特色功能 |
+| 服务 | 目录 | 认证方式 | 特色功能 |
 |------|------|---------|---------|
 | **GLM 编码计划** | `vscode/src/services/glm/` | API Key (Bearer Token) | 配额卡片 + 模型/工具用量详情 + SVG 曲线图（当日/近7天/近30天） |
 | **Kimi 会员** | `vscode/src/services/kimi/` | JWT Token (浏览器 Cookie) | 配额进度条 + 子限额展示 + 会员等级 + 有效期 |
@@ -651,6 +651,23 @@ build/
 ## 更新日志
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
+
+### [0.9.0] - 2026-06-10
+
+**新增**
+
+- 🌐 **浏览器扩展重构**：Chrome/Firefox 共享代码合并至 `browser-common/`，新增 `browser-api.js`/`cache.js`/`config.js` 共享模块
+- 🔌 **GLM Cookie Bridge**：三个服务（GLM/Kimi/MiMo）均支持通过浏览器扩展自动同步凭证
+- 🔍 **Bridge 端口发现增强**：预定义 fallback 端口列表 `[37100..37110]`，新增通用端口文件
+- 🔄 **凭证自动刷新**：每 30 分钟检测凭证有效性，失效时后台自动刷新
+
+**改进**
+
+- 🇨🇳 **UI 文本中文化**：服务名称、命令标题、状态栏全面中文化，移除 emoji
+- 🔒 **安全加固**：XSS 防护、CSP、敏感字段过滤、请求超时、Mutex 保护
+- ⚡ **性能优化**：LRU 内存缓存、AsyncQueue 并发控制、指数退避重试
+
+[查看完整更新日志 →](vscode/CHANGELOG.md)
 
 ### [0.3.0] - 2026-06-02
 

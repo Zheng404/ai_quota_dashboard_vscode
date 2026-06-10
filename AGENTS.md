@@ -720,6 +720,15 @@ Background (storage.onChanged 触发)
     └─ 定时凭证检测 (credentialCheck alarm, 每 30 分钟)
 ```
 
+### Cookie Bridge 端口发现
+
+VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现端口：
+
+1. **端口范围**：预定义 fallback 端口列表 `[37100..37110]`，顺序尝试直到找到可用端口
+2. **PID 端口文件**：写入 `os.tmpdir()/.ai-quota-bridge-port-{pid}`，避免多 VSCode 实例冲突
+3. **通用端口文件**：额外写入 `os.tmpdir()/.ai-quota-bridge-port`，供浏览器扩展快速发现
+4. **浏览器扩展发现**：优先尝试上次成功的端口，失败后遍历 `[37100..37110]`
+
 ### 凭证失效检测 + 自动刷新
 
 **检测机制**（每 30 分钟执行一次）：
