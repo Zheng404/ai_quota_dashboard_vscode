@@ -112,7 +112,12 @@ jobs:
       - name: Publish to VSCode Marketplace
         if: env.SKIP_PUBLISH != 'true'
         run: |
-          vsce publish -p ${{ secrets.VSCE_PAT }}
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          if vsce show Zheng404.ai-quota-dashboard@"$VERSION" > /dev/null 2>&1; then
+            echo "⚠️ Version $VERSION already exists on VSCode Marketplace, skipping publish"
+          else
+            vsce publish -p ${{ secrets.VSCE_PAT }}
+          fi
         env:
           SKIP_PUBLISH: ${{ secrets.VSCE_PAT == '' && 'true' || 'false' }}
 
@@ -125,7 +130,11 @@ jobs:
       - name: Publish to Open VSX
         if: env.SKIP_PUBLISH != 'true'
         run: |
-          ovsx publish -p ${{ secrets.OPENVSX_PAT }}
+          if ovsx get Zheng404.ai-quota-dashboard ${{ steps.get_version.outputs.VERSION }} > /dev/null 2>&1; then
+            echo "⚠️ Version ${{ steps.get_version.outputs.VERSION }} already exists on Open VSX, skipping publish"
+          else
+            ovsx publish -p ${{ secrets.OPENVSX_PAT }}
+          fi
         env:
           SKIP_PUBLISH: ${{ secrets.OPENVSX_PAT == '' && 'true' || 'false' }}
 
