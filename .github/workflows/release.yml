@@ -130,8 +130,10 @@ jobs:
       - name: Publish to Open VSX
         if: env.SKIP_PUBLISH != 'true'
         run: |
-          if ovsx get Zheng404.ai-quota-dashboard ${{ steps.get_version.outputs.VERSION }} > /dev/null 2>&1; then
-            echo "⚠️ Version ${{ steps.get_version.outputs.VERSION }} already exists on Open VSX, skipping publish"
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://open-vsx.org/api/Zheng404/ai-quota-dashboard/$VERSION")
+          if [ "$STATUS" = "200" ]; then
+            echo "⚠️ Version $VERSION already exists on Open VSX, skipping publish"
           else
             ovsx publish -p ${{ secrets.OPENVSX_PAT }}
           fi
