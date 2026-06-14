@@ -198,6 +198,24 @@ h1 {
 	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
+.kimi-card {
+	background: #fff;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	overflow: hidden;
+	margin-bottom: 16px;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.mimo-card {
+	background: #fff;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	overflow: hidden;
+	margin-bottom: 16px;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
 
 
 .service-card.error {
