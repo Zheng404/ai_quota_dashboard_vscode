@@ -24,19 +24,8 @@ export function getStyles(): string {
 	.tab-btn:hover { color: var(--vscode-foreground); }
 	.tab-btn.active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); font-weight: 500; }
 
-	.sub-tabs { display: flex; gap: 2px; margin-bottom: 12px; border-bottom: 1px solid var(--vscode-panel-border); }
-	.sub-tab-btn {
-		flex: 1; padding: 5px 10px; background: transparent; border: none;
-		border-bottom: 2px solid transparent; color: var(--vscode-descriptionForeground);
-		font-size: 11px; font-family: inherit; cursor: pointer; transition: all 0.2s;
-	}
-	.sub-tab-btn:hover { color: var(--vscode-foreground); }
-	.sub-tab-btn.active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); }
-
 	.tab-panel { display: none; }
 	.tab-panel.active { display: block; }
-	.sub-tab-panel { display: none; }
-	.sub-tab-panel.active { display: block; }
 
 	/* Service Cards (仪表盘) */
 	.service-card {

@@ -116,11 +116,35 @@ export const BRIDGE_STYLES = `
 	color: var(--vscode-errorForeground);
 }
 
-.bridge-hint {
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
-	margin-top: 10px;
-	padding-top: 10px;
-	border-top: 1px solid var(--vscode-panel-border);
-}
+	.bridge-hint {
+		font-size: 11px;
+		color: var(--vscode-descriptionForeground);
+		margin-top: 10px;
+		padding-top: 10px;
+		border-top: 1px solid var(--vscode-panel-border);
+	}
+
+	/* ===== 服务列表项内的 Bridge 状态（整合进 service-item） ===== */
+	.svc-row-datasource {
+		margin-bottom: 8px;
+	}
+	.svc-bridge-status {
+		margin-bottom: 4px;
+	}
+	.bridge-badge {
+		display: inline-block;
+		font-size: 10px;
+		padding: 2px 6px;
+		border-radius: 4px;
+		border: 1px solid;
+		font-weight: 500;
+	}
+	.bridge-badge.connected {
+		color: #22c55e;
+		border-color: #22c55e;
+	}
+	.bridge-badge.disconnected {
+		color: #ef4444;
+		border-color: #ef4444;
+	}
 `;

@@ -108,7 +108,7 @@ async function loadAll(force = false) {
 		} catch { /* ignore */ }
 	}
 
-	const enabledServices = config.services.filter(s => s.enabled);
+	const enabledServices = config.services.filter(s => s.enabled !== false);
 
 	if (enabledServices.length === 0) {
 			servicesEl.innerHTML = `
@@ -166,7 +166,7 @@ async function refreshSingleService(serviceId) {
 // ===== 渲染 =====
 
 function renderDashboard() {
-	const enabledServices = config.services.filter(s => s.enabled);
+	const enabledServices = config.services.filter(s => s.enabled !== false);
 	if (enabledServices.length === 0) {
 		servicesEl.innerHTML = `
 			<div class="empty-state">
