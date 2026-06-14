@@ -71,7 +71,7 @@ h1 {
 	font-weight: 500;
 }
 
-.tab-btn:hover, .sub-tab-btn:hover, .glm-main-tab:hover {
+.tab-btn:hover, .glm-main-tab:hover {
 	color: #374151;
 }
 
@@ -80,45 +80,11 @@ h1 {
 	border-bottom-color: #7c3aed;
 }
 
-.sub-tabs {
-	display: flex;
-	gap: 2px;
-	margin-bottom: 12px;
-	border-bottom: 1px solid #e5e7eb;
-}
-
-.sub-tab-btn {
-	flex: 1;
-	padding: 6px 12px;
-	background: transparent;
-	border: none;
-	border-bottom: 2px solid transparent;
-	color: #6b7280;
-	font-size: 12px;
-	font-family: inherit;
-	cursor: pointer;
-	transition: all 0.2s;
-}
-
-.sub-tab-btn.active {
-	color: #7c3aed;
-	border-bottom-color: #7c3aed;
-	font-weight: 500;
-}
-
 .tab-panel {
 	display: none;
 }
 
-.sub-tab-panel {
-	display: none;
-}
-
 .tab-panel.active {
-	display: block;
-}
-
-.sub-tab-panel.active {
 	display: block;
 }
 

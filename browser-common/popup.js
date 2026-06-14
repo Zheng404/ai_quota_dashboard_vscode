@@ -194,7 +194,7 @@ async function loadAll(force = false) {
 				<div class="empty-state">
 					<div class="empty-icon">📊</div>
 					<p class="empty-title">暂无服务数据</p>
-					<p class="empty-hint">切换到「设置」标签添加服务</p>
+					<p class="empty-hint">切换到「服务」标签添加服务</p>
 					<p class="empty-hint" style="margin-top: 8px; font-size: 11px;">
 						添加 Kimi / MiMo 卡片后自动开启 Cookie Bridge
 					</p>
@@ -261,7 +261,7 @@ function renderDashboard() {
 			<div class="empty-state">
 				<div class="empty-icon">📊</div>
 				<p class="empty-title">暂无服务数据</p>
-				<p class="empty-hint">切换到「设置」标签添加服务</p>
+				<p class="empty-hint">切换到「服务」标签添加服务</p>
 				<p class="empty-hint" style="margin-top: 8px; font-size: 11px;">
 					添加 Kimi / MiMo 卡片后自动开启 Cookie Bridge
 				</p>

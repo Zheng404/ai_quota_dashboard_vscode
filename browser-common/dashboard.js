@@ -37,8 +37,6 @@ const tabBtns = document.querySelectorAll('.tab-btn');
 const tabPanels = document.querySelectorAll('.tab-panel');
 const settingsServicesEl = document.getElementById('panel-services');
 const settingsGlobalEl = document.getElementById('panel-global');
-const settingsServicesEl = document.getElementById('settings-services');
-const settingsGlobalEl = document.getElementById('settings-global');
 
 // ===== 状态 =====
 
@@ -117,7 +115,7 @@ async function loadAll(force = false) {
 				<div class="empty-state">
 					<div class="empty-icon">📊</div>
 					<p class="empty-title">暂无服务数据</p>
-					<p class="empty-hint">切换到「设置」标签启用或添加服务</p>
+					<p class="empty-hint">切换到「服务」标签启用或添加服务</p>
 				</div>`;
 		refreshBtn.disabled = false;
 		refreshBtn.innerHTML = '刷新';
@@ -174,7 +172,7 @@ function renderDashboard() {
 			<div class="empty-state">
 				<div class="empty-icon">📊</div>
 				<p class="empty-title">暂无服务数据</p>
-				<p class="empty-hint">切换到「设置」标签启用或添加服务</p>
+				<p class="empty-hint">切换到「服务」标签启用或添加服务</p>
 			</div>`;
 		return;
 	}
