@@ -1,6 +1,6 @@
 # AI Quota Dashboard
 
-> VSCode 扩展插件 + 浏览器扩展 —— AI 配额用量仪表盘。实时追踪 GLM 编码计划、Kimi 会员、小米 MiMo Token 计划等 AI 服务的配额消耗情况，帮助开发者避免超额使用，合理规划 API 调用。
+> VSCode 扩展插件 + 浏览器扩展 —— AI 配额用量仪表盘。实时追踪 GLM Coding Plan (CN)、Kimi Membership、Xiaomi MiMo Token Plan 等 AI 服务的配额消耗情况，帮助开发者避免超额使用，合理规划 API 调用。
 
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=Zheng404.ai-quota-dashboard">
@@ -34,10 +34,10 @@
 
 | 特性 | 说明 |
 |------|------|
-| 🎯 **多服务支持** | 支持 GLM 编码计划、Kimi 会员、小米 MiMo Token 计划，通过注册表模式易于扩展更多 AI 服务 |
-| 📊 **实时仪表盘** | 侧边栏 Webview 展示配额进度、用量统计、历史趋势，支持 SVG 曲线图 |
+| 🎯 **多服务支持** | 支持 GLM Coding Plan (CN)、Kimi Membership、Xiaomi MiMo Token Plan，通过注册表模式易于扩展更多 AI 服务 |
+| 📊 **实时仪表盘** | 侧边栏 Webview 展示配额进度、用量统计、历史趋势，支持 SVG 曲线图；刷新时无缝保留旧数据 |
 | 📈 **状态栏监控** | 底部状态栏实时显示配额使用率、Token 用量和倒计时，颜色预警（绿/黄/红） |
-| 🌉 **Cookie Bridge 凭证转发** | 浏览器扩展自动采集 Kimi/MiMo Cookie 与 GLM API Key，推送至 VSCode 后**自动分发到对应 AI 服务**并自动创建，无需手动复制粘贴 |
+| 🌉 **Cookie Bridge 凭证转发** | 浏览器扩展自动采集 Kimi/MiMo Cookie 与 GLM API Key，推送至 VSCode 后**自动分发到对应 AI 服务**并自动创建，无需手动复制粘贴（需先在 VSCode 添加 Cookie Bridge 服务启用） |
 | 🔐 **双模式认证** | AI 服务支持 `manual`（手动输入）与 `bridge`（浏览器自动同步）两种模式，可随时切换 |
 | 🛎️ **配额预警通知** | 配额使用率超过阈值时弹出 VSCode 警告通知（30 分钟冷却，避免刷屏） |
 | 💤 **智能 AFK 检测** | 用户长时间无操作后自动暂停刷新，节省系统资源和 API 调用次数 |
@@ -158,24 +158,25 @@ code --install-extension ai-quota-dashboard-*.vsix
 最省事的方式 —— 安装浏览器扩展后，所有凭证自动从浏览器同步到 VSCode，无需手动复制粘贴。
 
 1. **安装 VSCode 扩展** 和 **浏览器扩展**（见上方安装步骤）
-2. 在浏览器中登录 [kimi.com](https://kimi.com) 和 [platform.xiaomimimo.com](https://platform.xiaomimimo.com)（MiMo）
-3. （可选）在浏览器扩展 Popup 的「设置」中填入 GLM API Key（GLM 凭证不来自浏览器登录态）
-4. 浏览器扩展会自动发现 VSCode Bridge 端口并推送凭证。VSCode 收到后会：
+2. 在 VSCode 仪表盘切换到 **「服务」** 标签，点击 **「添加服务」** 选择 **「Cookie Bridge」**。只有添加后 VSCode 才会启动本地 Bridge 服务器监听端口（移除该服务后会自动关闭）
+3. 在浏览器中登录 [kimi.com](https://kimi.com) 和 [platform.xiaomimimo.com](https://platform.xiaomimimo.com)（MiMo）
+4. （可选）在浏览器扩展 Popup 的「服务」中填入 GLM API Key（GLM 凭证不来自浏览器登录态）
+5. 浏览器扩展会自动发现 VSCode Bridge 端口并推送凭证。VSCode 收到后会：
    - **自动创建** 对应的 AI 服务（若尚不存在）
    - **自动写入凭证** 到 Secret Storage，并标记为 `dataSource='bridge'`
    - **去重**：同一服务类型只保留一个（优先保留 Bridge 推送的）
-5. 返回 **「仪表盘」** 即可查看实时配额
+6. 返回 **「仪表盘」** 即可查看实时配额
 
-> 💡 **提示**：浏览器扩展支持防抖推送（1.5s 延迟）和失败重试队列，确保凭证同步稳定可靠。若想改回手动输入，在 VSCode 设置页点击该服务卡片上的「切换为手动输入」即可。
+> 💡 **提示**：浏览器扩展支持防抖推送（1.5s 延迟）和失败重试队列，确保凭证同步稳定可靠。若想改回手动输入，在 VSCode 服务标签页点击该服务条目上的「切换为手动输入」即可。
 
 ---
 
 ### 方式二：手动输入认证信息
 
-不使用浏览器扩展时，可直接在 VSCode 设置页手动配置 AI 服务。
+不使用浏览器扩展时，可直接在 VSCode 服务标签页手动配置 AI 服务。
 
 1. 安装 **VSCode 扩展**
-2. 打开仪表盘，切换到 **「设置」** 标签
+2. 打开仪表盘，切换到 **「服务」** 标签
 3. 点击 **「添加服务」**，选择服务类型，根据提示填写认证信息：
 
    | 服务 | 认证方式 | 认证信息 | 获取方式 |
@@ -213,7 +214,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 ### 全局设置
 
-在仪表盘 **「设置 → 全局设置」** 中可以调整以下参数（同时会写入 VSCode Settings，可在设置面板编辑）：
+在仪表盘 **「设置」** 标签中可以调整以下参数（同时会写入 VSCode Settings，可在设置面板编辑）：
 
 | 设置项 | 默认值 | 说明 |
 |--------|--------|------|
@@ -225,10 +226,10 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 | 服务 | 目录 | 默认认证方式 | 特色功能 |
 |------|------|------------|---------|
-| **Cookie Bridge** | `vscode/src/services/bridge/` | 浏览器扩展推送 | 独立的状态监控卡片，显示浏览器扩展连接状态、最后同步时间和已接收凭证种类 |
-| **GLM 编码计划** | `vscode/src/services/glm/` | `manual`（可切 `bridge`） | API Key 认证；配额卡片 + 模型/工具用量详情 + SVG 曲线图（当日/近7天/近30天） |
-| **Kimi 会员** | `vscode/src/services/kimi/` | `manual`（可切 `bridge`） | JWT Token 认证；配额进度条 + 子限额展示 + 会员等级 + 有效期 |
-| **小米 MiMo Token 计划** | `vscode/src/services/mimo/` | `manual`（可切 `bridge`） | Cookie 认证；套餐用量统计 + 补偿 Token 额度 + 有效期展示 + 自动续费状态 |
+| **Cookie Bridge** | `vscode/src/services/bridge/` | 需用户手动添加后启用 | 状态整合在「服务」标签页的 Bridge 条目中，显示连接徽章、最后同步时间和已连接服务标签（Kimi/MiMo/GLM）；不在仪表盘单独展示卡片 |
+| **GLM Coding Plan (CN)** | `vscode/src/services/glm/` | `manual`（可切 `bridge`） | API Key（Bearer Token）认证；配额卡片 + 模型/工具用量详情 + SVG 曲线图（当日/近7天/近30天） |
+| **Kimi Membership** | `vscode/src/services/kimi/` | `manual`（可切 `bridge`） | `kimi-auth` Cookie 值作 Bearer Token（JWT）认证；配额进度条 + 子限额展示 + 会员等级 + 有效期 |
+| **Xiaomi MiMo Token Plan** | `vscode/src/services/mimo/` | `manual`（可切 `bridge`） | `serviceToken` Cookie 认证；套餐用量统计 + 补偿 Token 额度 + 有效期展示 + 自动续费状态 |
 
 ---
 
@@ -240,7 +241,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 ai_quota_dashboard_vscode/
 ├── vscode/                   # VSCode 扩展
 │   ├── src/
-│   │   ├── extension.ts      # 扩展入口：activate/deactivate、命令注册、轮询循环、Bridge 装配
+│   │   ├── extension.ts      # 扩展入口：activate/deactivate、命令注册、轮询循环、Bridge 按需启停（syncBridgeLifecycle）
 │   │   ├── bridge/           # Cookie Bridge HTTP 服务器
 │   │   │   └── server.ts     # 本地 HTTP 服务（127.0.0.1），接收浏览器扩展推送的凭证
 │   │   ├── core/             # 核心模块
@@ -254,7 +255,7 @@ ai_quota_dashboard_vscode/
 │   │   ├── services/         # 服务层（ServiceDescriptor 注册表模式）
 │   │   │   ├── registry.ts   # 服务注册表：kind → ServiceDescriptor 映射
 │   │   │   ├── types.ts      # QuotaProvider / StatusBarRenderer / DetailProvider 接口
-│   │   │   ├── bridge/       # Cookie Bridge 状态监控服务（独立服务卡片）
+│   │   │   ├── bridge/       # Cookie Bridge 状态监控服务（状态整合在「服务」标签页）
 │   │   │   ├── glm/          # GLM 服务完整包
 │   │   │   ├── kimi/         # Kimi 服务完整包
 │   │   │   └── mimo/         # MiMo 服务完整包
@@ -297,7 +298,7 @@ ai_quota_dashboard_vscode/
 ```typescript
 interface ServiceDescriptor {
   kind: ServiceId;                    // 'bridge' | 'glm' | 'kimi' | 'mimo' | ...
-  displayName: string;                // 'Cookie Bridge' | 'GLM 编码计划'
+  displayName: string;                // 'Cookie Bridge' | 'GLM Coding Plan (CN)'
   defaultName: string;                // 添加时的默认名称
   badgeLabel: string;
   badgeCssClass: string;
@@ -320,7 +321,8 @@ interface ServiceDescriptor {
 ```
 Browser Extension                        VSCode Extension
       │                                        │
-      │  1. VSCode Bridge 启动，监听            │
+      │  1. 用户添加 Cookie Bridge 服务后，     │
+      │     Bridge 启动监听                    │
       │     127.0.0.1:[37100..37110] 之一       │
       │◀───────────────────────────────────────┤
       │                                        │
@@ -353,12 +355,13 @@ Browser Extension                        VSCode Extension
       │◀───────────────────────────────────────┤
 ```
 
-**Bridge 自动分发机制**（`extension.ts` 的 `setupBridge`）：
+**Bridge 自动分发机制**（`extension.ts` 的 `handleCookiePayload`）：
+- **按需启停**：Bridge 服务器仅在用户添加了 Cookie Bridge 服务后启动（`syncBridgeLifecycle` → `ensureBridgeRunning`），移除该服务后自动关闭端口（`stopBridgeIfIdle`）
 - 浏览器扩展推送全部凭证（`kimiAuthToken` + `mimoCookie` + `glmApiKey`），VSCode **自动分发到对应的 AI 服务**
 - 分发时写入 Secret Storage 并标记 `dataSource='bridge'`；若对应 AI 服务不存在，**自动创建**
 - **去重**：同一服务类型只保留一个实例（优先保留 `dataSource='bridge'` 的）
 - **同步移除**：浏览器扩展推送 `activeKinds` 后，VSCode 会移除被浏览器删除的 bridge 来源服务
-- 用户可在 VSCode 设置页把某个服务从 `bridge` **切换为手动输入**
+- 用户可在 VSCode 服务标签页把某个服务从 `bridge` **切换为手动输入**
 
 **端口发现**：
 - VSCode Bridge 服务器依次尝试端口 `37100` ~ `37110`，找到第一个可用端口绑定 `127.0.0.1`
@@ -398,7 +401,7 @@ Browser Extension                        VSCode Extension
 ### 数据流
 
 ```
-pollAll() 定时触发
+pullAll() 定时触发
     │
     ├─ AFK 检测（用户无操作超阈值则跳过本次刷新）
     ├─ AsyncQueue 串行执行，消除并发竞态
@@ -413,15 +416,15 @@ pollAll() 定时触发
     ├─ saveHistory() → globalState 持久化
     └─ checkQuotaWarnings() → 超阈值弹出警告通知（30 分钟冷却）
 
-Cookie Bridge（独立数据流）：
-浏览器扩展 → POST /cookies → setupBridge 回调
+Cookie Bridge（独立数据流，仅当用户添加了 Cookie Bridge 服务后启动）：
+浏览器扩展 → POST /cookies → handleCookiePayload 回调
     │
     ├─ 更新 Bridge 服务状态（连接状态、最后同步时间、已接收凭证种类）
     ├─ 分发凭证到 AI 服务（Kimi/MiMo/GLM → Secret Storage + dataSource='bridge'）
     │   ├─ 去重：同 kind 只保留一个（优先 bridge）
     │   └─ 同步移除：浏览器已删除的 bridge 来源服务
     ├─ 标记 Bridge profile 为已连接
-    └─ 清除缓存 + 触发 pullAll() 刷新所有服务数据
+    └─ 热重载：保留旧数据 + 标记 refreshingIds + pullAll() 刷新（卡片不中断、按钮转圈）
 ```
 
 ### 配置存储
@@ -452,7 +455,7 @@ Cookie Bridge（独立数据流）：
 10. 在 `vscode/src/services/registry.ts` 注册
 11. 在 `vscode/src/dashboard/styles.ts` 引入新服务的样式
 
-新增 AI 服务默认 `dataSource='manual'`；若希望支持浏览器扩展自动同步，需同时让浏览器扩展 `background.js` 的 `COOKIE_TARGETS` / `gatherAll*` 采集该服务凭证，VSCode 端的 `setupBridge` 分发逻辑会自动按 `kind` 处理（目前内置支持 `glm`/`kimi`/`mimo`）。
+新增 AI 服务默认 `dataSource='manual'`；若希望支持浏览器扩展自动同步，需同时让浏览器扩展 `background.js` 的 `COOKIE_TARGETS` / `gatherAll*` 采集该服务凭证，VSCode 端的 `handleCookiePayload` 分发逻辑会自动按 `kind` 处理（目前内置支持 `glm`/`kimi`/`mimo`）。
 
 ---
 
@@ -568,10 +571,10 @@ build/
 ### Q: 浏览器扩展推送凭证后，VSCode 没有自动创建服务？
 
 **A**:
-1. 确认浏览器扩展已登录目标网站（kimi.com / xiaomimimo.com），或已在扩展设置中填入 GLM API Key
-2. 在浏览器扩展 Popup 中查看「VSCode 状态」是否已连接；未连接时点击「同步」手动触发
-3. 检查 VSCode Output Channel「AI Quota Dashboard」中 `[Bridge]` 日志
-4. 重启 VSCode 确保 Bridge 服务器已启动并监听端口
+1. **确认已在 VSCode「服务」标签添加 Cookie Bridge 服务**（只有添加后 Bridge 服务器才会启动并监听端口，浏览器扩展才能发现并推送凭证）
+2. 确认浏览器扩展已登录目标网站（kimi.com / xiaomimimo.com），或已在扩展设置中填入 GLM API Key
+3. 在浏览器扩展 Popup 中查看「VSCode 状态」是否已连接；未连接时点击「同步」手动触发
+4. 检查 VSCode Output Channel「AI Quota Dashboard」中 `[Bridge]` 日志
 
 ### Q: 状态栏显示 `?` 是什么意思？
 
@@ -609,7 +612,7 @@ build/
 ### Q: 浏览器扩展无法连接 VSCode？
 
 **A**:
-1. 重启 VSCode，确保 Bridge 服务器已启动（监听 `127.0.0.1:[37100..37110]` 之一）
+1. **确认已在 VSCode「服务」标签添加 Cookie Bridge 服务**（未添加则 Bridge 服务器不启动，浏览器扩展无法连接）
 2. 检查 VSCode Output Channel「AI Quota Dashboard」中的 `[Bridge]` 日志
 3. 浏览器扩展会自动重连（优先上次成功的端口，失败后遍历端口范围），等待几秒后重试
 4. 确认浏览器扩展 Popup 中「VSCode 状态」为已连接
@@ -657,6 +660,24 @@ build/
 ## 更新日志
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
+
+### [1.0.0] - 2026-06-14
+
+**新增**
+
+- ⚡ **仪表盘无缝刷新**：刷新时保留旧数据，对应服务卡片刷新按钮旋转；不再全屏"数据加载中"闪烁
+- 🔗 **Bridge 状态整合进「服务」标签页**：连接徽章、最后同步时间、已连接服务标签整合进服务列表的 Bridge 条目
+
+**变更**
+
+- 🌉 **Cookie Bridge 按需启停**：仅在用户添加 Cookie Bridge 服务后才启动 Bridge 服务器，移除后自动关闭
+- 🗂️ **tab 扁平化**：仪表盘/服务/设置三个平级标签（原为两级 tab）
+- 🏷️ **卡片服务名改用官方名称**：GLM Coding Plan (CN) / Kimi Membership / Xiaomi MiMo Token Plan
+- 📝 **Kimi / MiMo 凭证文案按认证机制区分**：Kimi（JWT/Bearer）、MiMo（serviceToken）
+
+**修复**
+
+- 🐛 刷新按钮 CSS（图标实际不旋转）、浏览器扩展 Kimi/MiMo 卡片边框缺失、dashboard.js 致命 bug 等
 
 ### [0.9.0] - 2026-06-10
 

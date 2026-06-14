@@ -6,21 +6,54 @@
 
 ### 新增 (Added)
 
+- **仪表盘无缝刷新**
+  - 引入 `refreshingIds`（正在刷新的服务 ID 集合），随 `updateData` 推送给前端
+  - 刷新时保留旧数据，对应服务卡片的刷新按钮旋转；不再全屏"数据加载中"占位
+  - 首次加载/新增服务时显示轻量加载骨架卡（`renderLoadingCard`）
+- **Cookie Bridge 状态整合进「服务」标签页**
+  - Bridge 连接徽章、最后同步时间、已连接服务标签（Kimi/MiMo/GLM）、诊断信息整合进「服务」标签页的 Bridge 服务条目
+  - 仪表盘不再单独显示 Bridge 卡片（`filter(p => p.kind !== 'bridge')`）
+
+### 变更 (Changed)
+
+- **Cookie Bridge 按需启停**
+  - Bridge 服务器从"扩展激活即无条件启动"改为"仅当用户添加 Cookie Bridge 服务后才启动"
+  - 新增 `syncBridgeLifecycle` / `ensureBridgeRunning` / `stopBridgeIfIdle` 管理生命周期；用户移除 Bridge 服务后自动关闭端口
+- **tab 结构扁平化（VSCode + 浏览器扩展）**
+  - 从两级 tab（仪表盘/设置，设置下含服务列表+全局设置子标签）改为三个平级标签：仪表盘 / 服务 / 设置
+- **卡片服务名改用官方名称**
+  - GLM Coding Plan (CN) / Kimi Membership / Xiaomi MiMo Token Plan（原为中文翻译）
+- **Kimi / MiMo 凭证文案按认证机制区分**（浏览器扩展）
+  - Kimi：`kimi-auth` Cookie（JWT 令牌）作 Bearer 认证
+  - MiMo：`serviceToken` Cookie 认证
+
+### 修复 (Fixed)
+
+- **刷新按钮 CSS**：`.btn-refresh-svc.spinning .icon` 选择器找不到元素（SVG 无 `.icon` class），刷新图标实际不旋转；改为 `.spinning svg`
+- **浏览器扩展 Kimi / MiMo 卡片边框缺失**：`.kimi-card` / `.mimo-card` 缺少样式定义（仅 `.glm-card` 有），补全后三个卡片视觉统一
+- **浏览器扩展刷新按钮文字旋转**：`<span class="spin">刷新</span>` 导致文字跟随旋转；文字移出 spin span，新增加载圆环指示器
+- **dashboard.js 致命 bug**：DOM 引用替换时遗留重复 `const` 声明导致 SyntaxError，独立仪表盘页面完全瘫痪；同时修复既有 id 不匹配 bug（`getElementById('settings-services')` vs HTML 的 `subpanel-services`）
+- **dashboard.js 服务过滤一致性**：`s.enabled` → `s.enabled !== false`，与 popup.js 对齐，避免缺少 `enabled` 字段时漏显服务
+
+## [1.0.0] - 2026-06-14
+
+### 新增 (Added)
+
 - **独立的 Cookie Bridge 服务卡片**
   - VSCode 扩展新增 `kind='bridge'` 服务，作为独立的状态监控卡片
   - 显示浏览器扩展连接状态、最后同步时间、已接收凭证种类（Kimi/MiMo/GLM）
   - Bridge 状态持久化到 `globalState`（`aiQuotaDashboard.bridgeState`），支持跨会话保留
 - **Cookie Bridge 自动分发凭证**
-  - 浏览器扩展推送的凭证（`kimiAuthToken` / `mimoCookie` / `glmApiKey`）由 `setupBridge()` **自动分发到对应的 AI 服务**：写入 Secret Storage 并标记 `dataSource='bridge'`
+  - 浏览器扩展推送的凭证（`kimiAuthToken` / `mimoCookie` / `glmApiKey`）由 `handleCookiePayload()` **自动分发到对应的 AI 服务**：写入 Secret Storage 并标记 `dataSource='bridge'`
   - 若对应 AI 服务不存在，**自动创建**；并对同一 kind 去重（优先保留 bridge 来源），避免重复卡片
   - 同步移除浏览器扩展已删除的 bridge 来源服务（基于推送的 `activeKinds`）
-  - 用户可在 VSCode 设置页把任意 AI 服务从 `bridge` 切换回 `manual` 手动输入
+  - 用户可在 VSCode 服务标签页把任意 AI 服务从 `bridge` 切换回 `manual` 手动输入
 - **配额预警通知**
   - `checkQuotaWarnings()` 在配额使用率超过 `warnThreshold` 时弹出 VSCode 警告通知，列出所有超阈值的服务
   - 30 分钟冷却期，避免每次轮询都弹通知
 - **VSCode 扩展激活失败保护**
   - `activate()` 增加顶层 try-catch，激活失败时显示错误通知并记录日志
-  - `setupBridge()` 启动失败时更新 Bridge 状态并记录诊断信息
+  - Bridge 服务器启动失败时更新 Bridge 状态并记录诊断信息
 
 ### 重构 (Changed)
 

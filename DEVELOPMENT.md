@@ -67,7 +67,7 @@ ai_quota_dashboard_vscode/
 │   │   │   ├── glm/            # GLM 服务完整包
 │   │   │   ├── kimi/           # Kimi 服务完整包
 │   │   │   ├── mimo/           # MiMo 服务完整包
-│   │   │   └── bridge/         # Cookie Bridge 服务卡片（kind='bridge'）
+│   │   │   └── bridge/         # Cookie Bridge 状态服务（kind='bridge'，状态整合在「服务」标签页）
 │   │   ├── ui/                 # 状态栏、Webview 仪表盘
 │   │   ├── dashboard/          # Webview 模板与样式
 │   │   ├── storage/            # 历史数据持久化
@@ -137,7 +137,7 @@ npm run test:watch
 
 ### 调试（F5）
 
-1. 在 VSCode 中打开 `vscode/` 文件夹作为工作区
+1. 在 VSCode 中打开**项目根目录**作为工作区
 2. 按 `F5` 或点击左侧「运行和调试」→「Run Extension」
 3. 这会启动一个新的 **Extension Development Host** 窗口
 4. 在新窗口中：
@@ -148,7 +148,7 @@ npm run test:watch
 **断点调试**：在源码中设置断点，Extension Host 会暂停并允许单步调试。
 
 ```json
-// .vscode/launch.json（如不存在可手动创建）
+// .vscode/launch.json（位于项目根目录）
 {
   "version": "0.2.0",
   "configurations": [
@@ -156,9 +156,9 @@ npm run test:watch
       "name": "Run Extension",
       "type": "extensionHost",
       "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
-      "outFiles": ["${workspaceFolder}/out/**/*.js"],
-      "preLaunchTask": "npm: compile"
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode"],
+      "outFiles": ["${workspaceFolder}/vscode/out/**/*.js"],
+      "preLaunchTask": "${defaultBuildTask}"
     }
   ]
 }
@@ -190,22 +190,26 @@ interface ServiceDescriptor {
 
 **数据流**：
 
+> 以下路径相对于 `vscode/src/`。
+
 ```
-pollAll() 定时触发
+pullAll() 定时触发
     ├─ AFK 检测（超阈值则跳过）
     ├─ AsyncQueue 串行执行（消除并发竞态）
     ├─ 遍历 ServiceProfile
-    │   ├─ 检查 LRU 内存缓存（正常 60s TTL / 错误数据 300s TTL）
-    │   ├─ resolveProvider(kind) → QuotaProvider.fetch(key, endpoint)
-    │   ├─ 返回 ServiceData
-    │   └─ attachHistory() 合并历史数据
+    │   ├─ 命中 LRU 内存缓存 → 直接使用旧数据
+    │   └─ 未命中 → refreshingIds.add(id) → resolveProvider(kind).fetch()
+    │        └─ fetch 完成后 refreshingIds.delete(id)
+    ├─ updateView() 先推一次（旧数据 + refreshingIds）→ 前端按钮转圈、卡片不中断
     ├─ StatusBar.feed() → flush()
-    ├─ DashboardWebviewViewProvider.update() → postMessage
+    ├─ DashboardWebviewViewProvider.update() → postMessage（含 refreshingIds）
     ├─ saveHistory() → globalState 持久化
     └─ checkQuotaWarnings() → 超阈值弹出 VSCode 警告通知（30 分钟冷却）
 ```
 
-> **Bridge 自动分发补充**：浏览器扩展推送凭证后，VSCode 的 `setupBridge()`（`extension.ts`）会**自动分发**到对应的 AI 服务（GLM/Kimi/MiMo）：写入 Secret Storage 并标记 `dataSource='bridge'`，若对应服务不存在则**自动创建**，并对同一 kind 去重（优先保留 bridge 来源）。用户也可在 VSCode 设置页把某个服务从 `bridge` 切换为 `manual` 手动输入。`kind='bridge'` 服务卡片本身只负责展示连接状态和已接收凭证种类。
+> **无缝刷新**：`refreshingIds: Set<string>` 标记正在刷新的服务，随 `updateData` 推送给前端。刷新时保留旧数据，对应服务卡片刷新按钮旋转（`.spinning svg`）；首次加载/新增服务时显示轻量加载骨架卡（`renderLoadingCard`）。仪表盘采用三个平级 tab：仪表盘 / 服务 / 设置。
+
+> **Bridge 按需启停**：Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**（`syncBridgeLifecycle` → `ensureBridgeRunning`），移除后自动关闭（`stopBridgeIfIdle`）。浏览器扩展推送凭证后，VSCode 的 `handleCookiePayload()`（`extension.ts`）会**自动分发**到对应的 AI 服务（GLM/Kimi/MiMo）：写入 Secret Storage 并标记 `dataSource='bridge'`，若对应服务不存在则**自动创建**，并对同一 kind 去重（优先保留 bridge 来源）。用户也可在 VSCode 服务标签页把某个服务从 `bridge` 切换为 `manual` 手动输入。Bridge 状态（连接徽章、最后同步、已连接服务标签）整合在「服务」标签页的 Bridge 服务条目内，不在仪表盘单独显示卡片。
 
 **注册服务**：在 `src/services/registry.ts` 中导入并注册：
 
@@ -216,6 +220,7 @@ const _defaultRegistry = createRegistry([
   glmDescriptor,
   kimiDescriptor,
   mimoDescriptor,
+  bridgeDescriptor,
   myServiceDescriptor,  // ← 新服务加在这里
 ]);
 ```
@@ -357,12 +362,12 @@ export const NOVA_SETTINGS: ServiceSettingsDescriptor = {
 };
 ```
 
-AI 服务默认 `dataSource='manual'`（手动输入）。设置页根据 `dataSource` 渲染三种形态：
+AI 服务默认 `dataSource='manual'`（手动输入）。服务标签页根据 `dataSource` 渲染三种形态：
 - `manual`：显示输入框 + 提示
 - `bridge`（由浏览器扩展推送得到）：显示「Cookie Bridge 自动推送」徽章 + 「切换为手动输入」按钮
 - `kind='bridge'` 服务本身：显示 Bridge 连接状态徽章
 
-若希望新服务支持浏览器扩展自动同步，还需在 `browser-common/scripts/background.js` 的 `COOKIE_TARGETS` 与 `gatherAll*` 中采集该服务凭证；VSCode 端 `extension.ts` 的 `setupBridge` 分发逻辑按 `kind` 匹配（内置 `glm`/`kimi`/`mimo`，新增 kind 需加入 `BRIDGE_AI_KINDS`）。
+若希望新服务支持浏览器扩展自动同步，还需在 `browser-common/scripts/background.js` 的 `COOKIE_TARGETS` 与 `gatherAll*` 中采集该服务凭证；VSCode 端 `extension.ts` 的 `handleCookiePayload` 分发逻辑按 `kind` 匹配（内置 `glm`/`kimi`/`mimo`，新增 kind 需加入 `BRIDGE_AI_KINDS`）。
 
 #### 第 7 步：实现状态栏渲染器（可选）
 
@@ -429,28 +434,18 @@ const _defaultRegistry = createRegistry([
   glmDescriptor,
   kimiDescriptor,
   mimoDescriptor,
+  bridgeDescriptor,
   novaDescriptor,  // ← 添加
 ]);
 ```
 
 #### 第 10 步：添加样式到仪表盘
 
-```typescript
-// src/dashboard/styles.ts
-import { NOVA_STYLES } from '../services/nova/styles';
-
-export const dashboardStyles = `
-  ${GLM_STYLES}
-  ${KIMI_STYLES}
-  ${MIMO_STYLES}
-  ${BRIDGE_STYLES}
-  ${NOVA_STYLES}  /* ← 添加 */
-`;
-```
+样式通过注册表**自动聚合**（`styles.ts` 遍历 `getAllDescriptors()` 收集每个服务的 `desc.styles`），无需手动编辑聚合代码。只需在 `nova/styles.ts` 导出 `NOVA_STYLES` 并在 `nova/index.ts` 的 descriptor 中设置 `styles: NOVA_STYLES` 即可：
 
 **注意事项**：
 - `ServiceProfile` 的 `dataSource` 字段决定凭证来源：`'manual'`（用户手动输入）或 `'bridge'`（浏览器扩展推送）
-- 新增 AI 服务时默认 `dataSource='manual'`；浏览器扩展推送凭证后，`setupBridge` 会自动将其改为 `'bridge'` 并写入 Secret Storage
+- 新增 AI 服务时默认 `dataSource='manual'`；浏览器扩展推送凭证后，`handleCookiePayload` 会自动将其改为 `'bridge'` 并写入 Secret Storage
 - Bridge 服务（`kind='bridge'`）固定 `dataSource='bridge'`，仅用于展示浏览器扩展连接状态
 - 同一 kind 的 AI 服务会被去重（`deduplicateAiProfiles`），优先保留 bridge 来源，避免重复卡片
 
@@ -461,7 +456,7 @@ VSCode 扩展的配置与状态持久化位置如下：
 | 数据 | 存储位置 | Key | 说明 |
 |------|---------|-----|------|
 | 服务列表 | `globalState` | `services` | `ServiceProfile[]`，含 `dataSource` 字段（`manual` 或 `bridge`） |
-| API Keys / Cookie | `Secret Storage` | `apiKeys.{serviceId}` | 每个 profile 独立存储；`bridge` 来源由 `setupBridge` 自动写入 |
+| API Keys / Cookie | `Secret Storage` | `apiKeys.{serviceId}` | 每个 profile 独立存储；`bridge` 来源由 `handleCookiePayload` 自动写入 |
 | 刷新间隔 | `globalState` + Settings | `refreshInterval` / `aiQuotaDashboard.refreshInterval` | 默认 600 秒，同步写入 Settings |
 | 预警阈值 | `globalState` + Settings | `warnThreshold` / `aiQuotaDashboard.warnThreshold` | 默认 0.8，超阈值触发警告通知（30 分钟冷却） |
 | AFK 阈值 | `globalState` + Settings | `afkThreshold` / `aiQuotaDashboard.afkThreshold` | 默认 3600 秒，同步写入 Settings |
@@ -470,10 +465,11 @@ VSCode 扩展的配置与状态持久化位置如下：
 
 **Bridge 状态说明**：
 
-- `aiQuotaDashboard.bridgeState` 保存 Bridge 服务卡片的运行状态：`connected`、`lastPushAt`、`receivedCredentials`（已接收凭证种类数组）、`lastError`。
-- 浏览器扩展推送凭证后，`setupBridge` 先更新该状态摘要，再把凭证**分发到对应的 AI 服务**（写入 Secret Storage 并标记 `dataSource='bridge'`），最后清除缓存并触发 `pullAll()` 刷新。
-- Bridge 服务卡片（`kind='bridge'`）通过 `ServiceDescriptor` 注册，其 provider（`bridge/provider.ts`）读取 `bridgeState` 生成展示数据，不拉取远程 API。
+- `aiQuotaDashboard.bridgeState` 保存 Bridge 的运行状态：`connected`、`lastPushAt`、`receivedCredentials`（已接收凭证种类数组）、`lastError`。
+- 浏览器扩展推送凭证后，`handleCookiePayload` 先更新该状态摘要，再把凭证**分发到对应的 AI 服务**（写入 Secret Storage 并标记 `dataSource='bridge'`），最后**热重载**刷新（保留旧数据 + 标记 refreshingIds + `pullAll()`）。
+- Bridge 状态（连接徽章、最后同步、已连接服务标签、诊断）整合在「服务」标签页的 Bridge 服务条目内（`settings.ts` 的 `renderServiceItem`），不在仪表盘单独显示卡片。`bridge/provider.ts` 读取 `bridgeState` 生成数据，不拉取远程 API。
 - 凭证分发支持自动创建：若对应 kind 的 AI 服务不存在，会自动创建一个并写入凭证。
+- Bridge 服务器**按需启停**：`syncBridgeLifecycle` 检查是否存在 `kind='bridge'` profile，有则 `ensureBridgeRunning` 启动监听，无则 `stopBridgeIfIdle` 关闭。
 
 ---
 
@@ -540,7 +536,7 @@ VSCode 扩展的配置与状态持久化位置如下：
 
 **核心行为**：
 
-1. **全量推送 + VSCode 自动分发**：总是推送 Kimi、MiMo、GLM 三类凭证。VSCode 的 `setupBridge` 收到后自动分发到对应 AI 服务（写入 Secret Storage + `dataSource='bridge'`），不存在则自动创建。同一 kind 去重，优先保留 bridge 来源。
+1. **全量推送 + VSCode 自动分发**：总是推送 Kimi、MiMo、GLM 三类凭证。VSCode 的 `handleCookiePayload` 收到后自动分发到对应 AI 服务（写入 Secret Storage + `dataSource='bridge'`），不存在则自动创建。同一 kind 去重，优先保留 bridge 来源。
 2. **监听所有目标 Cookie**：`chrome.cookies.onChanged` 监听所有目标域名（`kimi.com`、`xiaomimimo.com`）的目标 Cookie 变化，不受服务启用状态限制。
 3. **凭证变化即时通知**：Cookie 变化时经防抖推送给 VSCode，并广播 `cookieChanged` 消息给所有已打开的 Popup/Dashboard 页面触发单服务刷新。
 4. **定时凭证检测**：通过 `chrome.alarms` 每 30 分钟执行一次凭证存在性、过期时间和 API 探测检查，发现失效时尝试自动刷新（Offscreen API 双层策略 / 最小化弹出窗口降级）。
@@ -906,4 +902,4 @@ Firefox 临时加载的扩展在浏览器重启后会消失，属于正常行为
 
 ---
 
-*本文档最后更新：2026-06-14*
+*本文档最后更新：2026-06-15*
