@@ -93,7 +93,7 @@ export class DashboardWebviewViewProvider
     });
   }
 
-  update(data: Map<string, ServiceData>, settings?: SettingsData) {
+  update(data: Map<string, ServiceData>, settings?: SettingsData, refreshingIds?: string[]) {
     this.data = new Map(data);
     if (settings) {
       this.settings = settings;
@@ -103,6 +103,7 @@ export class DashboardWebviewViewProvider
         command: 'updateData',
         services: Array.from(this.data.values()),
         settings: this.settings,
+        refreshingIds: refreshingIds || [],
       });
     }
   }

@@ -235,14 +235,11 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 
 		const dashboardPanel = document.getElementById('panel-dashboard');
 		if (dashboardPanel) {
-			// 在替换 innerHTML 前记录正在刷新的服务 ID，替换后恢复 spinning 状态
-			const spinningIds = new Set();
-			document.querySelectorAll('.btn-refresh-svc.spinning').forEach(el => {
-				if (el.dataset.serviceId) spinningIds.add(el.dataset.serviceId);
-			});
+			// 后端权威驱动的刷新状态：哪些服务正在刷新（按钮转圈）
+			const refreshingSet = new Set(message.refreshingIds || []);
 
 			// 基于 profiles 渲染卡片框架，保证服务列表变化即时反映；
-			// 用 services 填充实际数据，未拉取到数据的服务显示 loading/错误占位。
+			// 用 services 填充实际数据。无缝刷新：有数据用真实数据，无数据用加载骨架卡。
 			// Cookie Bridge 卡片不在仪表盘显示，其状态展示在「服务」标签页顶部。
 			const profiles = (settings.profiles || []).filter(p => p.kind !== 'bridge');
 			const servicesMap = new Map();
@@ -251,14 +248,14 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 			const visibleServices = profiles.map(p => {
 				const data = servicesMap.get(p.id);
 				if (data) return data;
-				// 占位：服务存在但暂无数据
+				// 占位：服务存在但暂无数据 —— 显示轻量加载骨架卡（保留卡片框架，非错误卡）
 				return {
 					id: p.id,
 					name: p.displayName,
 					kind: p.kind,
 					slots: [],
 					updatedAt: Date.now(),
-					err: '数据加载中，请稍后...',
+					_loading: true,
 				};
 			});
 
@@ -266,8 +263,8 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 			dashboardPanel.innerHTML = hasConfig ? visibleServices.map(s => renderService(s)).join('') : renderNoConfig();
 			bindRefreshButtons();
 
-			// 恢复 spinning 状态
-			spinningIds.forEach(id => {
+			// 按后端 refreshingIds 标记正在刷新的服务按钮（转圈）
+			refreshingSet.forEach(id => {
 				const btn = document.querySelector('.btn-refresh-svc[data-service-id="' + id + '"]');
 				if (btn) btn.classList.add('spinning');
 			});

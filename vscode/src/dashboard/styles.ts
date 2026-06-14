@@ -77,8 +77,13 @@ export function getStyles(): string {
 	}
 	.btn-icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 	.btn-refresh-svc { padding: 2px 6px; font-size: 12px; margin-left: auto; margin-right: 6px; }
-	.btn-refresh-svc.spinning .icon { display: inline-block; animation: spin 1s linear infinite; }
+	.btn-refresh-svc.spinning svg { display: inline-block; animation: spin 1s linear infinite; }
 	@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+	/* Loading Card（无缝刷新：首次加载/新服务的轻量骨架卡） */
+	.loading-card { min-height: 80px; }
+	.loading-body { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 24px 12px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+	.loading-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--vscode-panel-border); border-top-color: var(--vscode-focusBorder); border-radius: 50%; animation: spin 0.8s linear infinite; }
 
 	/* Empty State */
 	.empty-state { text-align: center; padding: 40px 12px; color: var(--vscode-descriptionForeground); }

@@ -31,6 +31,11 @@ export function getSharedScript(): string {
 		return '<div class="service-card error"><div class="service-header"><span class="service-name">' + escapeHtml(data.name) + '</span><span class="badge badge-error">错误</span></div><p class="error-message">' + escapeHtml(data.err) + '</p></div>';
 	}
 
+	// 轻量加载骨架卡：保留卡片框架，内容区显示旋转图标 + 文字（无缝刷新）
+	function renderLoadingCard(data) {
+		return '<div class="service-card loading-card"><div class="service-header"><span class="service-name">' + escapeHtml(data.name) + '</span></div><div class="loading-body"><span class="loading-spinner"></span><span class="loading-text">加载中...</span></div></div>';
+	}
+
 	function renderSlot(slot) {
 		const pct = Math.min(slot.percent, 100);
 		const color = pct >= 90 ? 'danger' : pct >= 75 ? 'warning' : 'success';
@@ -53,6 +58,7 @@ export function getSharedScript(): string {
 
 	// 调度器 —— 每个服务必须注册专用模板，无 fallback
 	function renderService(data) {
+		if (data._loading) return renderLoadingCard(data);
 		if (data.err) return renderErrorCard(data);
 		const tmpl = serviceTemplates[data.kind];
 		if (tmpl) {

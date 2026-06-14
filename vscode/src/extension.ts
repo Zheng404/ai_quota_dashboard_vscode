@@ -67,6 +67,9 @@ class AsyncQueue {
 const refreshQueue = new AsyncQueue();
 const bridgeQueue = new AsyncQueue();
 
+// 正在刷新中的服务 ID 集合，随 updateData 推送给前端用于显示加载指示
+const refreshingIds = new Set<string>();
+
 // OutputChannel 用于替代 console.log/error
 const outputChannel = vscode.window.createOutputChannel('AI Quota Dashboard');
 
@@ -108,7 +111,7 @@ async function getCurrentSettings(): Promise<SettingsData> {
 
 // 更新视图
 async function updateView() {
-	dashboardViewProvider.update(serviceData, await getCurrentSettings());
+	dashboardViewProvider.update(serviceData, await getCurrentSettings(), Array.from(refreshingIds));
 }
 
 // 拉取单个服务（核心逻辑，被 pullService 和 pullAll 复用）
@@ -160,9 +163,16 @@ async function pullService(profileId: string, bar: StatusBar, ctx: vscode.Extens
 		const profile = profiles.find(p => p.id === profileId);
 		if (!profile) { return; }
 
+		// 标记该服务正在刷新，让前端刷新按钮转起来（旧数据保留）
+		refreshingIds.add(profileId);
+		await updateView();
+
 		const historyMap = loadHistory(ctx);
 		await fetchSingleService(profile, historyMap, bar);
 		bar.flush();
+
+		// 刷新完成，清除标记
+		refreshingIds.delete(profileId);
 		await updateView();
 		await saveHistory(ctx, serviceData);
 	});
@@ -175,7 +185,17 @@ async function doPullAll(bar: StatusBar, ctx: vscode.ExtensionContext): Promise<
 	// 加载历史数据（只需加载一次）
 	const historyMap = loadHistory(ctx);
 
-	for (const profile of config.loadProfiles()) {
+	const profiles = config.loadProfiles();
+	// 对需要重新拉取（未命中缓存）的服务提前标记刷新态，让前端按钮转起来
+	for (const profile of profiles) {
+		if (!cache.get(profile.id)) {
+			refreshingIds.add(profile.id);
+		}
+	}
+	// 先推一次视图（旧数据 + 刷新标记），避免拉取期间界面无变化
+	await updateView();
+
+	for (const profile of profiles) {
 		// 先读缓存
 		const cached = cache.get(profile.id);
 		if (cached) {
@@ -188,6 +208,8 @@ async function doPullAll(bar: StatusBar, ctx: vscode.ExtensionContext): Promise<
 
 		const ok = await fetchSingleService(profile, historyMap, bar);
 		if (ok) { hasResult = true; }
+		// 单个服务拉取完成，清除其刷新标记
+		refreshingIds.delete(profile.id);
 	}
 
 	// 统一渲染
@@ -198,9 +220,9 @@ async function doPullAll(bar: StatusBar, ctx: vscode.ExtensionContext): Promise<
 			// 配额预警检查
 			checkQuotaWarnings();
 		} else {
-		bar.setEmpty();
-		await updateView();
-	}
+			bar.setEmpty();
+			await updateView();
+		}
 }
 
 // 拉取所有服务数据（带队列保护，供外部调用）
@@ -220,8 +242,13 @@ async function afterConfigChange(bar: StatusBar, ctx: vscode.ExtensionContext, m
 		// 清空所有缓存（因为配置变了，需要重新拉取）
 		bar.clear();
 		cache.clear();
-		serviceData.clear();
-		// 更新视图（显示新配置）
+		// 注意：不清空 serviceData —— 保留旧数据让前端卡片不闪烁。
+		// 标记所有当前服务为刷新中，前端会在按钮处显示转圈（旧数据保留）。
+		refreshingIds.clear();
+		for (const p of config.loadProfiles()) {
+			refreshingIds.add(p.id);
+		}
+		// 推一次视图（旧数据 + 刷新标记）
 		await updateView();
 		// 刷新数据（直接调用内部逻辑，避免嵌套队列死锁）
 		await doPullAll(bar, ctx);
