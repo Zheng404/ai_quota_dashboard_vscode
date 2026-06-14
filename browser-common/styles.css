@@ -667,6 +667,17 @@ to {
 	display: inline-block;
 }
 
+/* 空 spin span 用作旋转指示器（加载圆环） */
+.spin:empty {
+	width: 12px;
+	height: 12px;
+	border: 2px solid currentColor;
+	border-top-color: transparent;
+	border-radius: 50%;
+	opacity: 0.6;
+	vertical-align: middle;
+}
+
 /* ===== 响应式 ===== */
 @media (max-width: 480px) {
 	.container { padding: 16px 12px;

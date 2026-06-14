@@ -176,7 +176,7 @@ async function loadAll(force = false) {
 	isLoading = true;
 
 	refreshBtn.disabled = true;
-	refreshBtn.innerHTML = '<span class="spin">刷新</span>';
+	refreshBtn.innerHTML = '<span class="spin"></span>刷新中';
 
 	try {
 		if (config.glmApiKey) {
@@ -231,7 +231,7 @@ async function loadAll(force = false) {
 			</div>`;
 	} finally {
 		refreshBtn.disabled = false;
-		refreshBtn.innerHTML = '刷新';
+		refreshBtn.innerHTML = '🔄';
 		isLoading = false;
 	}
 }
