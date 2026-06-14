@@ -645,9 +645,13 @@ function handleCookiePayload(payload: CookiePayload, bar: StatusBar, ctx: vscode
 		// 清除缓存并刷新所有服务（Bridge 推送的新凭证需要生效）
 		if (distributed || bridgeProfile) {
 			cache.clear();
-			// 服务列表可能已变化，清空旧 serviceData 并立即更新视图，避免残留/缺失卡片
-			serviceData.clear();
-			bar.clear();
+			// 热重载：不清空 serviceData，保留旧数据让前端卡片不中断。
+			// 标记当前所有服务为刷新中，前端在按钮处显示转圈（旧数据保留）。
+			refreshingIds.clear();
+			for (const p of config.loadProfiles()) {
+				refreshingIds.add(p.id);
+			}
+			// 推一次视图（旧数据 + 刷新标记）
 			await updateView();
 			try {
 				await pullAll(bar, ctx);
