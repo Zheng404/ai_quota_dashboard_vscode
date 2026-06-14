@@ -379,11 +379,11 @@ export const glmProvider: QuotaProvider = {
 		const { slots, level } = parseLimits(quotaRaw.data ?? { limits: [] });
 		const nextRenewTime = subRaw ? parseSubscription(subRaw) : undefined;
 
-		// 2. 模型用量（当日）
-		const modelUsage = await fetchGlmModelUsage(base, headers, 1);
-
-		// 3. 工具用量（当日）
-		const toolUsage = await fetchGlmToolUsage(base, headers, 1);
+		// 2. 模型用量 + 工具用量（并行拉取）
+		const [modelUsage, toolUsage] = await Promise.all([
+			fetchGlmModelUsage(base, headers, 1),
+			fetchGlmToolUsage(base, headers, 1),
+		]);
 
 		return {
 			id: 'glm',

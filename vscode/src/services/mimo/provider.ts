@@ -56,7 +56,7 @@ async function mimoGet<T>(url: string, cookie: string, timeout = 15000): Promise
 		return await getJson<T>(url, headers, timeout);
 	} catch (err) {
 		if (err instanceof Error && (err.message.includes('HTTP 401') || err.message.includes('Unauthorized'))) {
-			throw new Error('MiMo 认证失败：请使用浏览器开发者工具获取 Cookie 值');
+			throw new Error('MiMo 登录凭证已过期，请重新登录 MiMo 网站');
 		}
 		throw err;
 	}

@@ -2,6 +2,57 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增 (Added)
+
+- **独立的 Cookie Bridge 服务卡片**
+  - VSCode 扩展新增 `kind='bridge'` 服务，作为独立的状态监控卡片
+  - 显示浏览器扩展连接状态、最后同步时间、已接收凭证种类（Kimi/MiMo/GLM）
+  - Bridge 状态持久化到 `globalState`（`aiQuotaDashboard.bridgeState`），支持跨会话保留
+- **Cookie Bridge 自动分发凭证**
+  - 浏览器扩展推送的凭证（`kimiAuthToken` / `mimoCookie` / `glmApiKey`）由 `setupBridge()` **自动分发到对应的 AI 服务**：写入 Secret Storage 并标记 `dataSource='bridge'`
+  - 若对应 AI 服务不存在，**自动创建**；并对同一 kind 去重（优先保留 bridge 来源），避免重复卡片
+  - 同步移除浏览器扩展已删除的 bridge 来源服务（基于推送的 `activeKinds`）
+  - 用户可在 VSCode 设置页把任意 AI 服务从 `bridge` 切换回 `manual` 手动输入
+- **配额预警通知**
+  - `checkQuotaWarnings()` 在配额使用率超过 `warnThreshold` 时弹出 VSCode 警告通知，列出所有超阈值的服务
+  - 30 分钟冷却期，避免每次轮询都弹通知
+- **VSCode 扩展激活失败保护**
+  - `activate()` 增加顶层 try-catch，激活失败时显示错误通知并记录日志
+  - `setupBridge()` 启动失败时更新 Bridge 状态并记录诊断信息
+
+### 重构 (Changed)
+
+- **浏览器扩展统一凭证推送**
+  - `background.js` 不再依赖 `activeKinds` 选择性转发凭证
+  - 总是采集并推送全部凭证：`kimiAuthToken` + `mimoCookie` + `glmApiKey`
+  - Cookie 变化监听关注所有目标站点 Cookie，不再受服务启用状态限制
+  - `init()` / `configUpdated` / 启动后总是尝试连接并推送全部凭证
+- **全局设置同步到 VSCode Settings**
+  - `config.ts` 的 `setState()` 对刷新间隔、预警阈值、AFK 阈值三项额外调用 `workspace.getConfiguration().update()`，使其在 VSCode 设置面板中可编辑
+- **端口发现改为 `/health` 探测**
+  - VSCode 端写入 PID 端口文件 `os.tmpdir()/.ai-quota-bridge-port-{pid}`（权限 0600），仅用于本地进程管理
+  - 浏览器扩展优先尝试上次成功的端口（`storage.local` 的 `bridgeLastPort`），失败后遍历 `[37100..37110]` 逐个 `GET /health` 探测
+- **MiMo 凭证检测增强**
+  - `checkCredentialValidity('mimo')` 增加 API 探测，识别服务端 session 过期但客户端 Cookie 仍存在的场景
+  - API 返回 401/403 或业务码非 0 时返回 `invalid`，触发强制刷新
+- **Bridge 连接诊断增强**
+  - `BRIDGE.lastError` 记录端口发现/推送失败的最后错误信息
+  - `getStatus` 在 `connected=false` 时主动触发 `discoverPort()` 并返回诊断
+  - popup 设置页显示红色诊断信息
+- **MiMo 错误提示优化**
+  - 401 和业务级未登录统一提示"MiMo 登录凭证已过期，请重新登录 MiMo 网站"
+  - VSCode 端和浏览器扩展端提示文案保持一致
+
+### 修复 (Fixed)
+
+- **VSCode `/cookies` 端点 GLM 推送问题**
+  - 修复了仅当 `cookies` 数组非空时才触发回调的问题
+  - 现在只要有 `cookies` / `kimiAuthToken` / `mimoCookie` / `glmApiKey` 任意凭证即触发 Bridge 状态更新和分发
+- **旧数据 `dataSource` 兼容**
+  - `initDefaults()` 后调用 `migrateBridgeDataSource()`，将缺失 `dataSource` 的旧 profile 默认设为 `manual`
+
 ## [0.9.0] - 2026-06-10
 
 ### 新增 (Added)

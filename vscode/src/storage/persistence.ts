@@ -25,7 +25,8 @@ export function loadHistory(ctx: vscode.ExtensionContext): Map<string, UsagePoin
  */
 export async function saveHistory(
 	ctx: vscode.ExtensionContext,
-	dataMap: Map<string, ServiceData>
+	dataMap: Map<string, ServiceData>,
+	profiles?: ServiceProfile[]
 ): Promise<void> {
 	const existing = ctx.globalState.get<StoredHistory>(STORAGE_KEY, {});
 	const now = Date.now();
@@ -45,7 +46,7 @@ export async function saveHistory(
 
 		// 添加新的数据点（如果和上一个不同）
 		const last = pts[pts.length - 1];
-		if (!last || last.tokens !== used && !(Number.isNaN(last.tokens) && Number.isNaN(used))) {
+		if (!last || (last.tokens !== used && !(Number.isNaN(last.tokens) && Number.isNaN(used)))) {
 			pts.push({
 				at: now,
 				tokens: used,
@@ -57,8 +58,12 @@ export async function saveHistory(
 		merged[sid] = pts.filter(p => p.at >= cutoff);
 	}
 
-	// 保留未更新的服务的历史数据
+	// 保留未更新的服务的历史数据（如果仍在配置中）
+	const activeIds = new Set(profiles?.map(p => p.id) ?? Array.from(dataMap.keys()));
 	for (const [sid, pts] of Object.entries(existing)) {
+		if (!activeIds.has(sid)) {
+			continue; // 服务已删除，清理其历史数据
+		}
 		if (!merged[sid]) {
 			merged[sid] = pts.filter(p => p.at >= cutoff);
 		}

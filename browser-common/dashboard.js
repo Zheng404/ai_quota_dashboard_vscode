@@ -7,11 +7,12 @@
 import { fetchGlmQuota, fetchGlmDetail } from './api/glm.js';
 import { fetchKimiQuota } from './api/kimi.js';
 import { fetchMimoQuota } from './api/mimo.js';
-import { renderService, switchGlmMainTab, switchGlmSubTab, mergeGlmDetailData, cleanupGlmState, fmtDateTime } from './templates.js';
+import { renderService, switchGlmMainTab, switchGlmSubTab, mergeGlmDetailData, cleanupGlmState, fmtDateTime, escapeHtml } from './templates.js';
+import { config, loadConfig, saveConfig } from './config.js';
+import { getCached, setCached } from './cache.js';
 
 // ===== 常量 =====
 
-const CACHE_TTL_MS = 60 * 1000;
 const TIMEOUT_MS = 20000;
 
 const SERVICE_FETCHERS = {
@@ -21,9 +22,9 @@ const SERVICE_FETCHERS = {
 };
 
 const SERVICE_LABELS = {
-	glm: 'GLM 编码计划',
-	kimi: 'Kimi 会员',
-	mimo: '小米 MiMo',
+	glm: 'GLM Coding Plan (CN)',
+	kimi: 'Kimi Membership',
+	mimo: 'Xiaomi MiMo Token Plan',
 };
 
 // ===== DOM 元素 =====
@@ -43,81 +44,18 @@ const settingsGlobalEl = document.getElementById('settings-global');
 
 let serviceDataMap = new Map();
 let isLoading = false;
-let config = {
-	services: [
-		{ id: 'kimi', kind: 'kimi', name: 'Kimi', enabled: true },
-		{ id: 'mimo', kind: 'mimo', name: 'MiMo', enabled: true },
-	],
-	glmApiKey: '',
-	settings: {
-		refreshInterval: 600,
-		warnThreshold: 0.8,
-	},
-};
+let currentTab = 'dashboard';
+let currentSubTab = '';
+// config 从 config.js 导入（共享配置模块）
 
-// ===== 配置管理 =====
-
-async function loadConfig() {
-	try {
-		const stored = await chrome.storage.local.get(['dashboardConfig', 'glmApiKey']);
-		if (stored.dashboardConfig) {
-			config = { ...config, ...stored.dashboardConfig };
-		}
-		if (stored.glmApiKey) {
-			config.glmApiKey = stored.glmApiKey;
-		}
-		// 确保 GLM 服务项存在
-		const hasGlm = config.services.some(s => s.kind === 'glm');
-		if (!hasGlm && config.glmApiKey) {
-			config.services.push({ id: 'glm', kind: 'glm', name: 'GLM', enabled: true });
-		}
-	} catch (err) {
-		console.error('[Dashboard] 加载配置失败:', err);
-	}
-}
-
-async function saveConfig() {
-	try {
-		await chrome.storage.local.set({
-			dashboardConfig: config,
-			glmApiKey: config.glmApiKey,
-		});
-	} catch (err) {
-		console.error('[Dashboard] 保存配置失败:', err);
-	}
-}
-
-// ===== 缓存 =====
-
-async function getCached(serviceId) {
-	try {
-		const result = await chrome.storage.local.get(`quotaCache_${serviceId}`);
-		const entry = result[`quotaCache_${serviceId}`];
-		if (!entry) return null;
-		const age = Date.now() - entry.timestamp;
-		if (age > CACHE_TTL_MS) return null;
-		return entry.data;
-	} catch {
-		return null;
-	}
-}
-
-async function setCached(serviceId, data) {
-	try {
-		await chrome.storage.local.set({
-			[`quotaCache_${serviceId}`]: { data, timestamp: Date.now() },
-		});
-	} catch {
-		// ignore
-	}
-}
+// 配置管理和缓存函数从 config.js / cache.js 导入
 
 // ===== 数据加载 =====
 
 function withTimeout(promise, ms) {
 	return Promise.race([
 		promise,
-		new Promise((_, reject) =
+		new Promise((_, reject) =>
 			setTimeout(() => reject(new Error('请求超时')), ms)
 		),
 	]);
@@ -154,6 +92,7 @@ async function loadService(serviceConfig, force = false) {
 			slots: [],
 			updatedAt: Date.now(),
 			err: err.message || '加载失败，请检查网络连接后重试',
+			_isError: true,
 		};
 	}
 }
@@ -197,6 +136,10 @@ async function loadAll(force = false) {
 	serviceDataMap = new Map();
 	for (const data of results) {
 		serviceDataMap.set(data.id, data);
+		// 错误数据写入缓存（使用更长 TTL，避免频繁重试）
+		if (data.err && data._isError) {
+			await setCached(data.id, data, true);
+		}
 	}
 
 	renderDashboard();
@@ -338,10 +281,6 @@ function renderSettingsGlobal() {
 
 	document.getElementById('save-global-btn').addEventListener('click', handleSaveGlobal);
 	document.getElementById('clear-cache-btn').addEventListener('click', handleClearCache);
-}
-
-function escapeHtml(text) {
-	return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ===== 事件处理 =====
@@ -510,18 +449,63 @@ settingsBtn.addEventListener('click', () => {
 	renderSettings();
 });
 
+// ===== Cookie 变化即时刷新 =====
+
+let cookieRefreshTimeout = null;
+const pendingCookieKinds = new Set();
+
+chrome.runtime.onMessage.addListener((msg) => {
+	if (msg.action !== 'cookieChanged' || !msg.kind) return;
+
+	// 收集变化的 kinds，防抖结束后批量刷新（避免快速连续消息丢失服务）
+	pendingCookieKinds.add(msg.kind);
+	clearTimeout(cookieRefreshTimeout);
+	cookieRefreshTimeout = setTimeout(() => {
+		const kinds = [...pendingCookieKinds];
+		pendingCookieKinds.clear();
+		for (const kind of kinds) {
+			const svc = config.services.find(s => s.kind === kind && s.enabled !== false);
+			if (svc) {
+				refreshSingleService(svc.id);
+			}
+		}
+	}, 2000);
+});
+
 // ===== 初始化 =====
+
+let refreshTimer = null;
+
+/** 调度下一次自动刷新（使用 setTimeout 递归，能响应刷新间隔变化） */
+function scheduleRefresh() {
+	clearTimeout(refreshTimer);
+	const interval = config.settings.refreshInterval || 600;
+	if (interval > 0) {
+		refreshTimer = setTimeout(() => {
+			if (currentTab === 'dashboard') {
+				loadAll();
+			}
+			scheduleRefresh();
+		}, interval * 1000);
+	}
+}
 
 async function init() {
 	await loadConfig();
+	// 独立仪表盘默认包含 kimi + mimo（仅在无已配置服务时）
+	if (config.services.length === 0) {
+		config.services = [
+			{ id: 'kimi', kind: 'kimi', name: 'Kimi', enabled: true },
+			{ id: 'mimo', kind: 'mimo', name: 'MiMo', enabled: true },
+		];
+	}
+	// 确保 GLM 服务项存在（当有 API Key 时自动添加）
+	const hasGlm = config.services.some(s => s.kind === 'glm');
+	if (!hasGlm && config.glmApiKey) {
+		config.services.push({ id: 'glm', kind: 'glm', name: 'GLM', enabled: true });
+	}
 	await loadAll();
-
-	// 自动刷新
-	setInterval(() => {
-		if (config.settings.refreshInterval > 0 && currentTab === 'dashboard') {
-			loadAll();
-		}
-	}, config.settings.refreshInterval * 1000);
+	scheduleRefresh();
 }
 
 init();

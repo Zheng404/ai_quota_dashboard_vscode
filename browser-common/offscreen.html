@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<!--
+  Offscreen Document — Cookie Refresh Carrier (Chrome only)
+
+  Created by Service Worker via chrome.offscreen API, completely invisible.
+  Two-layer refresh strategy:
+    1. fetch(credentials: include) — fast, no X-Frame-Options issues
+    2. If cookies unchanged after fetch (JS didn't execute), fallback to iframe
+-->
+<html>
+<head><title></title></head>
+<body>
+<script>
+/**
+ * Refresh cookies via fetch network request.
+ * Fast but relies on server setting cookies via Set-Cookie response headers.
+ */
+async function refreshViaFetch(url) {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    // Any server response means Set-Cookie headers were processed
+    return res.ok || res.status === 401;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refresh cookies via hidden iframe — loads full page, executes JS.
+ * Slower but more reliable; covers cookie-setting via document.cookie.
+ */
+async function refreshViaIframe(url) {
+  return new Promise((resolve) => {
+    let resolved = false;
+
+    const done = (ok) => {
+      if (resolved) return;
+      resolved = true;
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      resolve(ok);
+    };
+
+    const timer = setTimeout(() => done(false), 15_000);
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:0;height:0;border:none;position:absolute;';
+    iframe.src = url;
+
+    iframe.onload = () => {
+      // Page loaded, wait for JS to execute and refresh cookies
+      setTimeout(() => {
+        clearTimeout(timer);
+        done(true);
+      }, 6000);
+    };
+
+    iframe.onerror = () => {
+      clearTimeout(timer);
+      done(false);
+    };
+
+    document.body.appendChild(iframe);
+  });
+}
+
+/**
+ * Take a snapshot of cookie values for comparison before/after refresh.
+ */
+async function getCookieSnapshot(url, names) {
+  const map = {};
+  for (const name of names) {
+    try {
+      const c = await chrome.cookies.get({ url, name });
+      map[name] = c ? `${c.value}|${c.expirationDate ?? 0}` : '';
+    } catch { /* ignore */ }
+  }
+  return JSON.stringify(map);
+}
+
+// Listen for messages from Service Worker
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.action !== 'offscreenRefresh' || !msg.url) return false;
+
+  const { url, cookieUrl, cookieNames } = msg;
+
+  (async () => {
+    // Snapshot cookies before refresh
+    const before = cookieUrl && cookieNames?.length
+      ? await getCookieSnapshot(cookieUrl, cookieNames)
+      : null;
+
+    // Step 1: Fast fetch attempt
+    const fetchOk = await refreshViaFetch(url);
+
+    // Brief wait for cookie writes
+    await new Promise(r => setTimeout(r, 800));
+
+    // Check if cookies changed
+    if (before !== null) {
+      const afterFetch = await getCookieSnapshot(cookieUrl, cookieNames);
+      if (afterFetch !== before) {
+        sendResponse({ loaded: true, method: 'fetch' });
+        return;
+      }
+    }
+
+    // Step 2: Fetch didn't refresh cookies, fallback to iframe (executes page JS)
+    const iframeOk = await refreshViaIframe(url);
+    sendResponse({ loaded: fetchOk || iframeOk, method: iframeOk ? 'iframe' : 'fetch' });
+  })();
+
+  return true; // Keep message channel open for async sendResponse
+});
+</script>
+</body>
+</html>

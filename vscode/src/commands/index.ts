@@ -14,6 +14,8 @@ export function registerAll(context: vscode.ExtensionContext): vscode.Disposable
 			);
 			if (ans === '确定') {
 				await clearHistory(context);
+				// 通知所有监听者历史数据已变化，触发仪表盘刷新
+				await vscode.commands.executeCommand('aiQuotaDashboard.refresh');
 				vscode.window.showInformationMessage('历史数据已清除');
 			}
 		})

@@ -36,10 +36,10 @@
 
 | 工具 | 版本 | 说明 |
 |------|------|------|
-| **Node.js** | 20.x | 运行 TypeScript 编译、测试和打包 |
-| **npm** | 10.x | 包管理器（随 Node.js 安装） |
+| **Node.js** | ≥ 18（推荐 20.x） | 运行 TypeScript 编译、测试和打包 |
+| **npm** | 随 Node.js 安装 | 包管理器 |
 | **VSCode** | ≥ 1.80 | 运行和调试 VSCode 扩展 |
-| **Chrome / Edge** | 最新版 | 测试浏览器扩展（Chrome Manifest V3） |
+| **Chrome / Edge** | ≥ 116 | 测试浏览器扩展（Offscreen API 需要 116+） |
 | **Firefox** | ≥ 116 | 测试 Firefox 版本（Manifest V3） |
 | **vsce** | 全局安装 | 打包 VSIX：`npm install -g @vscode/vsce` |
 | **Git** | 任意 | 版本控制 |
@@ -66,7 +66,8 @@ ai_quota_dashboard_vscode/
 │   │   │   ├── types.ts        # QuotaProvider / ServiceDescriptor 接口
 │   │   │   ├── glm/            # GLM 服务完整包
 │   │   │   ├── kimi/           # Kimi 服务完整包
-│   │   │   └── mimo/           # MiMo 服务完整包
+│   │   │   ├── mimo/           # MiMo 服务完整包
+│   │   │   └── bridge/         # Cookie Bridge 服务卡片（kind='bridge'）
 │   │   ├── ui/                 # 状态栏、Webview 仪表盘
 │   │   ├── dashboard/          # Webview 模板与样式
 │   │   ├── storage/            # 历史数据持久化
@@ -170,7 +171,7 @@ npm run test:watch
 ```typescript
 // src/services/types.ts
 interface ServiceDescriptor {
-  kind: ServiceId;                    // 服务标识，如 'glm'
+  kind: ServiceId;                    // 服务标识，如 'glm' | 'kimi' | 'mimo' | 'bridge'
   displayName: string;                // 显示名称
   defaultName: string;                // 默认自定义名称
   badgeLabel: string;                 // 徽章文字
@@ -192,15 +193,19 @@ interface ServiceDescriptor {
 ```
 pollAll() 定时触发
     ├─ AFK 检测（超阈值则跳过）
+    ├─ AsyncQueue 串行执行（消除并发竞态）
     ├─ 遍历 ServiceProfile
-    │   ├─ 检查内存缓存 (60s TTL)
+    │   ├─ 检查 LRU 内存缓存（正常 60s TTL / 错误数据 300s TTL）
     │   ├─ resolveProvider(kind) → QuotaProvider.fetch(key, endpoint)
     │   ├─ 返回 ServiceData
     │   └─ attachHistory() 合并历史数据
     ├─ StatusBar.feed() → flush()
     ├─ DashboardWebviewViewProvider.update() → postMessage
-    └─ saveHistory() → globalState 持久化
+    ├─ saveHistory() → globalState 持久化
+    └─ checkQuotaWarnings() → 超阈值弹出 VSCode 警告通知（30 分钟冷却）
 ```
+
+> **Bridge 自动分发补充**：浏览器扩展推送凭证后，VSCode 的 `setupBridge()`（`extension.ts`）会**自动分发**到对应的 AI 服务（GLM/Kimi/MiMo）：写入 Secret Storage 并标记 `dataSource='bridge'`，若对应服务不存在则**自动创建**，并对同一 kind 去重（优先保留 bridge 来源）。用户也可在 VSCode 设置页把某个服务从 `bridge` 切换为 `manual` 手动输入。`kind='bridge'` 服务卡片本身只负责展示连接状态和已接收凭证种类。
 
 **注册服务**：在 `src/services/registry.ts` 中导入并注册：
 
@@ -352,6 +357,13 @@ export const NOVA_SETTINGS: ServiceSettingsDescriptor = {
 };
 ```
 
+AI 服务默认 `dataSource='manual'`（手动输入）。设置页根据 `dataSource` 渲染三种形态：
+- `manual`：显示输入框 + 提示
+- `bridge`（由浏览器扩展推送得到）：显示「Cookie Bridge 自动推送」徽章 + 「切换为手动输入」按钮
+- `kind='bridge'` 服务本身：显示 Bridge 连接状态徽章
+
+若希望新服务支持浏览器扩展自动同步，还需在 `browser-common/scripts/background.js` 的 `COOKIE_TARGETS` 与 `gatherAll*` 中采集该服务凭证；VSCode 端 `extension.ts` 的 `setupBridge` 分发逻辑按 `kind` 匹配（内置 `glm`/`kimi`/`mimo`，新增 kind 需加入 `BRIDGE_AI_KINDS`）。
+
 #### 第 7 步：实现状态栏渲染器（可选）
 
 ```typescript
@@ -431,9 +443,37 @@ export const dashboardStyles = `
   ${GLM_STYLES}
   ${KIMI_STYLES}
   ${MIMO_STYLES}
+  ${BRIDGE_STYLES}
   ${NOVA_STYLES}  /* ← 添加 */
 `;
 ```
+
+**注意事项**：
+- `ServiceProfile` 的 `dataSource` 字段决定凭证来源：`'manual'`（用户手动输入）或 `'bridge'`（浏览器扩展推送）
+- 新增 AI 服务时默认 `dataSource='manual'`；浏览器扩展推送凭证后，`setupBridge` 会自动将其改为 `'bridge'` 并写入 Secret Storage
+- Bridge 服务（`kind='bridge'`）固定 `dataSource='bridge'`，仅用于展示浏览器扩展连接状态
+- 同一 kind 的 AI 服务会被去重（`deduplicateAiProfiles`），优先保留 bridge 来源，避免重复卡片
+
+### 配置存储与 Bridge 状态持久化
+
+VSCode 扩展的配置与状态持久化位置如下：
+
+| 数据 | 存储位置 | Key | 说明 |
+|------|---------|-----|------|
+| 服务列表 | `globalState` | `services` | `ServiceProfile[]`，含 `dataSource` 字段（`manual` 或 `bridge`） |
+| API Keys / Cookie | `Secret Storage` | `apiKeys.{serviceId}` | 每个 profile 独立存储；`bridge` 来源由 `setupBridge` 自动写入 |
+| 刷新间隔 | `globalState` + Settings | `refreshInterval` / `aiQuotaDashboard.refreshInterval` | 默认 600 秒，同步写入 Settings |
+| 预警阈值 | `globalState` + Settings | `warnThreshold` / `aiQuotaDashboard.warnThreshold` | 默认 0.8，超阈值触发警告通知（30 分钟冷却） |
+| AFK 阈值 | `globalState` + Settings | `afkThreshold` / `aiQuotaDashboard.afkThreshold` | 默认 3600 秒，同步写入 Settings |
+| 历史数据 | `globalState` | `aiQuotaDashboard.history` | 30 天保留，UTC 按日期去重 |
+| **Bridge 连接状态** | `globalState` | `aiQuotaDashboard.bridgeState` | 由 `bridge/state.ts` 维护（内存 + globalState 双层） |
+
+**Bridge 状态说明**：
+
+- `aiQuotaDashboard.bridgeState` 保存 Bridge 服务卡片的运行状态：`connected`、`lastPushAt`、`receivedCredentials`（已接收凭证种类数组）、`lastError`。
+- 浏览器扩展推送凭证后，`setupBridge` 先更新该状态摘要，再把凭证**分发到对应的 AI 服务**（写入 Secret Storage 并标记 `dataSource='bridge'`），最后清除缓存并触发 `pullAll()` 刷新。
+- Bridge 服务卡片（`kind='bridge'`）通过 `ServiceDescriptor` 注册，其 provider（`bridge/provider.ts`）读取 `bridgeState` 生成展示数据，不拉取远程 API。
+- 凭证分发支持自动创建：若对应 kind 的 AI 服务不存在，会自动创建一个并写入凭证。
 
 ---
 
@@ -478,15 +518,46 @@ export const dashboardStyles = `
 
 **关键调试技巧**：在 `scripts/background.js` 中使用 `console.log()` 输出日志，内容会显示在 Service Worker 的 DevTools 控制台中。
 
+### background.js 职责
+
+浏览器扩展作为**统一凭证推送端**，负责将浏览器侧获取的全部凭证（Kimi/MiMo Cookie + GLM API Key）推送给 VSCode，VSCode 端自动分发到对应的 AI 服务：
+
+```javascript
+// 推送数据示例（POST /cookies，需携带 X-Auth-Token 头）
+{
+  source: 'ai-quota-cookie-bridge',
+  timestamp: Date.now(),
+  cookies: [
+    { service: 'kimi', name: 'kimi-auth', value: '...', domain: '.kimi.com' },
+    { service: 'mimo', name: 'api-platform_serviceToken', value: '...', domain: '.xiaomimimo.com' },
+    { service: 'mimo', name: 'userId', value: '...', domain: '.xiaomimimo.com' },
+  ],
+  kimiAuthToken: '...',      // 可直接作为 Bearer Token 使用
+  mimoCookie: 'name=val;...',
+  glmApiKey: '...'           // 浏览器扩展中配置的 GLM API Key
+}
+```
+
+**核心行为**：
+
+1. **全量推送 + VSCode 自动分发**：总是推送 Kimi、MiMo、GLM 三类凭证。VSCode 的 `setupBridge` 收到后自动分发到对应 AI 服务（写入 Secret Storage + `dataSource='bridge'`），不存在则自动创建。同一 kind 去重，优先保留 bridge 来源。
+2. **监听所有目标 Cookie**：`chrome.cookies.onChanged` 监听所有目标域名（`kimi.com`、`xiaomimimo.com`）的目标 Cookie 变化，不受服务启用状态限制。
+3. **凭证变化即时通知**：Cookie 变化时经防抖推送给 VSCode，并广播 `cookieChanged` 消息给所有已打开的 Popup/Dashboard 页面触发单服务刷新。
+4. **定时凭证检测**：通过 `chrome.alarms` 每 30 分钟执行一次凭证存在性、过期时间和 API 探测检查，发现失效时尝试自动刷新（Offscreen API 双层策略 / 最小化弹出窗口降级）。
+5. **端口发现**：启动时遍历 fallback 端口 `[37100..37110]`，对每个端口 `GET /health` 探测，连接成功后获取 `authToken` 并维持推送通道。优先尝试上次成功的端口。
+
+> **GLM API Key 说明**：GLM 凭证不是浏览器登录态，而是用户在浏览器扩展 Popup 设置中手动填入、保存在 `chrome.storage.local` 的 API Key，由 `gatherAllStorageCredentials()` 采集后一并推送。
+
 ### Chrome 与 Firefox 的差异
 
 | 差异点 | Chrome | Firefox |
 |--------|--------|---------|
-| **Manifest** | 标准 V3 | V3 + `browser_specific_settings.gecko` |
+| **Manifest** | 标准 V3 + `offscreen` 权限 | V3 + `browser_specific_settings.gecko` |
 | **扩展 ID** | 自动生成 | 需在 manifest 中显式声明 `id` |
-| **Background** | `service_worker` | `scripts`（数组） |
-| **Cookie API** | `chrome.cookies` | `chrome.cookies（Firefox 内置兼容）` |
-| **最小版本** | Chrome 88+ | Firefox 116+ |
+| **Background** | `service_worker`（`type: module`） | `scripts` 数组（`type: module`） |
+| **Cookie API** | `chrome.cookies` | `chrome.cookies`（Firefox 内置兼容） |
+| **凭证刷新** | Offscreen API（fetch → iframe 双层策略） | 最小化弹出窗口降级方案 |
+| **最小版本** | Chrome 116+ | Firefox 116+ |
 | **持久性** | Service Worker 非持久 | 事件页面 |
 
 **代码兼容性**：项目中使用 `const api = typeof browser !== 'undefined' ? browser : chrome;` 做 API 兼容（如已封装）。
@@ -835,4 +906,4 @@ Firefox 临时加载的扩展在浏览器重启后会消失，属于正常行为
 
 ---
 
-*本文档最后更新：2026-06-10*
+*本文档最后更新：2026-06-14*

@@ -105,7 +105,8 @@ export class ConfigManager {
 		this.validateDisplayName(displayName);
 		const profiles = this.loadProfiles();
 		const id = `${kind}-${Date.now()}-${this.nextId++}`;
-		profiles.push({ id, kind, displayName: displayName.trim(), dataSource: 'manual' });
+		const dataSource = kind === 'bridge' ? 'bridge' : 'manual';
+		profiles.push({ id, kind, displayName: displayName.trim(), dataSource });
 		await this.saveProfiles(profiles);
 		return id;
 	}
@@ -184,6 +185,22 @@ export class ConfigManager {
 	async initDefaults() {
 		// Intentionally empty — 保持向后兼容，未来可在此添加迁移逻辑
 	}
+
+	/** 设置所有 bridge 模式服务的数据来源（用于新架构下默认启用 bridge） */
+	async migrateBridgeDataSource(): Promise<void> {
+		const profiles = this.loadProfiles();
+		let changed = false;
+		for (const p of profiles) {
+			// 旧数据可能没有 dataSource 字段，默认视为 manual 保持兼容
+			if (!p.dataSource) {
+				p.dataSource = 'manual';
+				changed = true;
+			}
+		}
+		if (changed) {
+			await this.saveProfiles(profiles);
+		}
+	}
 }
 
 // ==================== 兼容层（单例导出，供现有代码平滑迁移） ====================
@@ -193,6 +210,10 @@ let _globalManager: ConfigManager | undefined;
 function getManager(): ConfigManager {
 	if (!_globalManager) {
 		_globalManager = new ConfigManager();
+		// 开发模式警告：ConfigManager 在 setContext() 之前使用会导致所有读取返回默认值
+		if (process.env.NODE_ENV !== 'production') {
+			console.warn('[ConfigManager] 在 setContext() 之前创建实例，读取操作将返回默认值');
+		}
 	}
 	return _globalManager;
 }
@@ -217,3 +238,4 @@ export async function setPollInterval(sec: number): Promise<void> { return getMa
 export async function setWarnThreshold(val: number): Promise<void> { return getManager().setWarnThreshold(val); }
 export async function setAfkThreshold(sec: number): Promise<void> { return getManager().setAfkThreshold(sec); }
 export async function initDefaults() { return getManager().initDefaults(); }
+export async function migrateBridgeDataSource() { return getManager().migrateBridgeDataSource(); }

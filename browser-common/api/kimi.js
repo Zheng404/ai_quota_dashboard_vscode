@@ -2,6 +2,10 @@
  * Kimi API Client (Browser Extension)
  *
  * 从浏览器 Cookie 读取凭证，调用 Kimi 配额 API，返回与 VSCode 扩展兼容的完整数据。
+ *
+ * ⚠️ 数据解析函数需与 VSCode 扩展保持同步：
+ * vscode/src/services/kimi/provider.ts 中的 parseWindowSlot / parseMainSlot / parseBalanceSlot
+ * 当 API 响应格式变化时，两侧需同步修改。
  */
 
 const KIMI_BASE_URL = 'https://www.kimi.com';

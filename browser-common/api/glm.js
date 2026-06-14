@@ -2,6 +2,10 @@
  * GLM API Client (Browser Extension)
  *
  * 从 chrome.storage 读取 API Key，调用 GLM 配额 API。
+ *
+ * ⚠️ 数据解析函数需与 VSCode 扩展保持同步：
+ * vscode/src/services/glm/provider.ts 中的 parseLimits / parseSubscription / parseModelUsage / parseToolUsage
+ * 当 API 响应格式变化时，两侧需同步修改。
  */
 
 const GLM_BASE_URL = 'https://open.bigmodel.cn';

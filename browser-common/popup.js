@@ -1,8 +1,8 @@
 /**
  * AI Quota Dashboard — 浏览器扩展主逻辑（Popup 版）
  *
- * 支持 GLM / Kimi / MiMo，需手动添加服务。
- * 添加哪个卡片就开启哪个卡片的 Cookie Bridge（凭证从浏览器自动获取并转发给 VSCode）。
+ * 支持 GLM / Kimi / MiMo，以及独立的 Cookie Bridge 状态卡片。
+ * 凭证由浏览器扩展统一推送给 VSCode，自动分发到对应的 AI 服务（GLM/Kimi/MiMo）。
  */
 
 import { fetchGlmQuota, fetchGlmDetail } from './api/glm.js';
@@ -15,6 +15,7 @@ import { getCached, setCached } from './cache.js';
 // ===== 常量 =====
 
 const CACHE_TTL_MS = 60 * 1000;
+const CACHE_ERROR_TTL_MS = 5 * 60 * 1000;  // 错误数据缓存 5 分钟，避免频繁重试
 const TIMEOUT_MS = 20000;
 
 const SERVICE_FETCHERS = {
@@ -24,18 +25,18 @@ const SERVICE_FETCHERS = {
 };
 
 const SERVICE_LABELS = {
-	glm: 'GLM 编码计划',
-	kimi: 'Kimi 会员',
-	mimo: '小米 MiMo',
+	glm: 'GLM Coding Plan (CN)',
+	kimi: 'Kimi Membership',
+	mimo: 'Xiaomi MiMo Token Plan',
 };
 
-/** 需要 Cookie Bridge 的服务（凭证来自浏览器） */
-const BRIDGE_KINDS = new Set(['glm', 'kimi', 'mimo']);
+/** 所有支持的服务类型（不限于 Cookie Bridge，也包括 API Key 类服务） */
+const ALL_SERVICE_KINDS = new Set(['glm', 'kimi', 'mimo']);
 
 const SERVICE_KINDS = [
-	{ kind: 'glm', label: 'GLM 编码计划', desc: 'Cookie Bridge 转发 API Key' },
-	{ kind: 'kimi', label: 'Kimi 会员', desc: 'Cookie Bridge 转发凭证' },
-	{ kind: 'mimo', label: '小米 MiMo', desc: 'Cookie Bridge 转发凭证' },
+	{ kind: 'glm', label: 'GLM Coding Plan (CN)', desc: 'Cookie Bridge forwards API Key' },
+	{ kind: 'kimi', label: 'Kimi Membership', desc: 'Cookie Bridge forwards credentials' },
+	{ kind: 'mimo', label: 'Xiaomi MiMo Token Plan', desc: 'Cookie Bridge forwards credentials' },
 ];
 
 // ===== DOM 元素 =====
@@ -58,6 +59,7 @@ let isLoading = false;
 let bridgeStatus = {
 	connected: false,
 	activeKinds: [],
+	lastError: null,
 };
 // config 从 config.js 导入
 
@@ -71,15 +73,16 @@ async function checkBridgeStatus() {
 	try {
 		const response = await new Promise((resolve) => {
 			chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
-				resolve(response || { connected: false, activeKinds: [] });
+				resolve(response || { connected: false, activeKinds: [], lastError: null });
 			});
 		});
 		bridgeStatus = {
 			connected: response.connected || false,
 			activeKinds: response.activeKinds || [],
+			lastError: response.lastError || null,
 		};
 	} catch {
-		bridgeStatus = { connected: false, activeKinds: [] };
+		bridgeStatus = { connected: false, activeKinds: [], lastError: '无法与后台脚本通信' };
 	}
 }
 
@@ -111,9 +114,10 @@ function withTimeout(promise, ms) {
 
 /** 获取服务的 Cookie Bridge 状态 */
 function getBridgeStateForKind(kind) {
-	if (!BRIDGE_KINDS.has(kind)) return null;
+	// Bridge 状态是全局的，不再按 kind 区分
+	if (!ALL_SERVICE_KINDS.has(kind)) return null;
 	return {
-		isBridgeActive: bridgeStatus.activeKinds.includes(kind),
+		isBridgeActive: true,
 		isVscodeConnected: bridgeStatus.connected,
 	};
 }
@@ -165,6 +169,7 @@ async function loadService(serviceConfig, force = false) {
 					: 'inactive')
 				: undefined,
 			err: err.message || '加载失败，请检查网络连接后重试',
+			_isError: true,  // 标记为错误数据，使用更长缓存 TTL
 		};
 	}
 }
@@ -210,6 +215,10 @@ async function loadAll(force = false) {
 		serviceDataMap = new Map();
 		for (const data of results) {
 			serviceDataMap.set(data.id, data);
+			// 错误数据写入缓存（使用更长 TTL，避免频繁重试）
+			if (data.err && data._isError) {
+				await setCached(data.id, data, true);
+			}
 		}
 
 		renderDashboard();
@@ -301,9 +310,13 @@ function renderSettingsServices() {
 						<div style="font-weight: 600; font-size: 12px; color: ${isActive ? (isConnected ? '#166534' : '#854d0e') : '#6b7280'};">
 							Cookie Bridge ${isActive ? (isConnected ? '— 已连接 VSCode' : '— 等待 VSCode 连接') : ''}
 						</div>
-						<div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
-							已启用：${escapeHtml(bridgeLabels.join('、'))}
-						</div>
+					<div style="font-size: 11px; color: #6b7280; margin-top: 2px;">
+						已启用：${escapeHtml(bridgeLabels.join('、'))}
+					</div>
+					${!isConnected ? `
+					<div style="font-size: 10px; color: #ef4444; margin-top: 4px;">
+						诊断：${escapeHtml(bridgeStatus.lastError || '无法连接到 VSCode Bridge，请确认 VSCode 扩展已安装并激活')}
+					</div>` : ''}
 						<div style="font-size: 10px; color: #9ca3af; margin-top: 2px;">
 							凭证从浏览器自动获取，每 30 分钟检测有效性，失效时自动刷新
 						</div>
@@ -330,11 +343,11 @@ function renderSettingsServices() {
 	if (config.services.length === 0) {
 		html += '<p style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">暂无服务配置，请从下方添加</p>';
 	} else {
-		for (const svc of config.services) {
-			const isGlm = svc.kind === 'glm';
-			const bridgeActive = bridgeStatus.activeKinds.includes(svc.kind);
+	for (const svc of config.services) {
+		const isGlm = svc.kind === 'glm';
+		const isBridge = svc.kind === 'bridge';
 
-			html += `
+		html += `
 				<div class="service-item-card" data-service-id="${svc.id}">
 					<div class="svc-row">
 						<span class="svc-name">${escapeHtml(svc.name)}</span>
@@ -347,20 +360,32 @@ function renderSettingsServices() {
 					</div>
 					` : ''}
 					<div class="form-group">
-						<label class="form-label">凭证来源</label>
+						<label class="form-label">${isBridge ? 'VSCode 状态' : '凭证来源'}</label>
 						<p class="form-hint">
-							${isGlm ? 'API Key 通过 Cookie Bridge 转发给 VSCode' : '从浏览器自动获取 Cookie'}
-							${bridgeActive
-								? (bridgeStatus.connected ? ' — 已转发至 VSCode' : ' — 等待 VSCode 连接')
-								: ' — 桥接未激活'}
+							${isBridge
+								? (bridgeStatus.connected ? '已连接 VSCode' : '等待 VSCode 连接')
+								: (isGlm ? 'API Key 将自动推送至 VSCode 扩展' : 'Cookie 由浏览器扩展自动获取并推送至 VSCode')
+							}
 						</p>
+						${svc.kind === 'kimi' || svc.kind === 'mimo' ? `
+						<div style="margin-top: 8px; padding: 8px; background: #fef9c3; border-radius: 4px; font-size: 11px; color: #854d0e;">
+							${SERVICE_LABELS[svc.kind]} 的登录 Cookie 是 session cookie，浏览器重启后需重新获取。
+						</div>
+						<div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
+							<input type="checkbox" id="${svc.kind}-auto-refresh-${svc.id}" ${config.settings[svc.kind + 'AutoRefresh'] ? 'checked' : ''}>
+							<label for="${svc.kind}-auto-refresh-${svc.id}" style="font-size: 12px; color: #374151; cursor: pointer;">
+								浏览器重启后自动后台访问 ${SERVICE_LABELS[svc.kind]} 刷新凭证
+							</label>
+						</div>
+						<button class="btn btn-sm btn-secondary open-site-btn" data-service-id="${svc.id}" data-kind="${svc.kind}" style="margin-top: 8px;">打开 ${SERVICE_LABELS[svc.kind]} 网站</button>
+						` : ''}
 					</div>
 					<div class="svc-actions">
 						<button class="btn btn-sm btn-primary save-svc-btn" data-service-id="${svc.id}">保存配置</button>
 						<button class="btn btn-sm btn-danger remove-svc-btn" data-service-id="${svc.id}">删除服务</button>
 					</div>
 				</div>`;
-		}
+	}
 	}
 
 	// 添加服务区域
@@ -392,6 +417,18 @@ function renderSettingsServices() {
 	});
 	settingsServicesEl.querySelectorAll('.add-svc-btn').forEach(btn => {
 		btn.addEventListener('click', handleAddService);
+	});
+	settingsServicesEl.querySelectorAll('.open-mimo-btn').forEach(btn => {
+		btn.addEventListener('click', handleOpenMimo);
+	});
+	settingsServicesEl.querySelectorAll('input[type="checkbox"][id^="mimo-auto-refresh-"]').forEach(checkbox => {
+		checkbox.addEventListener('change', handleMimoAutoRefreshToggle);
+	});
+	settingsServicesEl.querySelectorAll('.open-site-btn').forEach(btn => {
+		btn.addEventListener('click', handleOpenSite);
+	});
+	settingsServicesEl.querySelectorAll('input[type="checkbox"][id^="kimi-auto-refresh-"]').forEach(checkbox => {
+		checkbox.addEventListener('change', handleKimiAutoRefreshToggle);
 	});
 }
 
@@ -533,6 +570,50 @@ async function handleRemoveService(e) {
 	renderDashboard();
 }
 
+async function handleOpenMimo(e) {
+	const btn = e.target;
+	try {
+		await chrome.tabs.create({ url: 'https://platform.xiaomimimo.com', active: true });
+		btn.textContent = '已打开';
+		setTimeout(() => btn.textContent = '打开 MiMo 网站', 1500);
+	} catch (err) {
+		console.error('[Popup] 打开 MiMo 网站失败:', err);
+		btn.textContent = '打开失败';
+		setTimeout(() => btn.textContent = '打开 MiMo 网站', 1500);
+	}
+}
+
+async function handleOpenSite(e) {
+	const btn = e.target;
+	const kind = btn.dataset.kind;
+	const url = kind === 'kimi' ? 'https://www.kimi.com' : 'https://platform.xiaomimimo.com';
+	try {
+		await chrome.tabs.create({ url, active: true });
+		btn.textContent = '已打开';
+		setTimeout(() => btn.textContent = `打开 ${SERVICE_LABELS[kind]} 网站`, 1500);
+	} catch (err) {
+		console.error(`[Popup] 打开 ${kind} 网站失败:`, err);
+		btn.textContent = '打开失败';
+		setTimeout(() => btn.textContent = `打开 ${SERVICE_LABELS[kind]} 网站`, 1500);
+	}
+}
+
+async function handleMimoAutoRefreshToggle(e) {
+	const checkbox = e.target;
+	config.settings.mimoAutoRefresh = checkbox.checked;
+	await saveConfig();
+	await notifyConfigUpdated();
+	console.log('[Popup] MiMo 自动刷新已' + (checkbox.checked ? '开启' : '关闭'));
+}
+
+async function handleKimiAutoRefreshToggle(e) {
+	const checkbox = e.target;
+	config.settings.kimiAutoRefresh = checkbox.checked;
+	await saveConfig();
+	await notifyConfigUpdated();
+	console.log('[Popup] Kimi 自动刷新已' + (checkbox.checked ? '开启' : '关闭'));
+}
+
 async function handleAddService(e) {
 	const btn = e.target.closest('.add-svc-btn');
 	if (!btn) return;
@@ -625,6 +706,29 @@ function scheduleRefresh() {
 		}, interval * 1000);
 	}
 }
+
+// ===== Cookie 变化即时刷新 =====
+
+let cookieRefreshTimeout = null;
+const pendingCookieKinds = new Set();
+
+/** Cookie 变化时，收集变化的 kinds 防抖后批量刷新（避免快速连续消息丢失服务） */
+chrome.runtime.onMessage.addListener((msg) => {
+	if (msg.action !== 'cookieChanged' || !msg.kind) return;
+
+	pendingCookieKinds.add(msg.kind);
+	clearTimeout(cookieRefreshTimeout);
+	cookieRefreshTimeout = setTimeout(() => {
+		const kinds = [...pendingCookieKinds];
+		pendingCookieKinds.clear();
+		for (const kind of kinds) {
+			const svc = config.services.find(s => s.kind === kind && s.enabled !== false);
+			if (svc) {
+				refreshSingleService(svc.id);
+			}
+		}
+	}, 2000);
+});
 
 // ===== 初始化 =====
 

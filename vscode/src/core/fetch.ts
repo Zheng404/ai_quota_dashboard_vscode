@@ -1,3 +1,4 @@
+import * as http from 'http';
 import * as https from 'https';
 import { URL } from 'url';
 
@@ -48,14 +49,16 @@ function sleep(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** 底层 HTTPS 请求封装（单发） */
+/** 底层 HTTP(S) 请求封装（单发，根据 URL scheme 自动选择协议） */
 function doRequest<T>(options: HttpRequestOptions): Promise<T> {
 	return new Promise((resolve, reject) => {
 		const u = new URL(options.url);
-		const req = https.request(
+		const isSecure = u.protocol === 'https:';
+		const requestFn = isSecure ? https.request : http.request;
+		const req = requestFn(
 			{
 				hostname: u.hostname,
-				port: u.port || 443,
+				port: u.port || (isSecure ? 443 : 80),
 				path: u.pathname + u.search,
 				method: options.method,
 				headers: options.headers,
@@ -109,7 +112,7 @@ function doRequest<T>(options: HttpRequestOptions): Promise<T> {
 }
 
 /**
- * 底层 HTTPS 请求封装（支持重试、日志）
+ * 底层 HTTP(S) 请求封装（支持重试、日志，根据 URL scheme 自动选择协议）
  * 使用 Buffer 数组累积响应，避免大响应时字符串拼接性能问题
  */
 export async function httpRequest<T>(options: HttpRequestOptions): Promise<T> {
@@ -155,7 +158,7 @@ export async function httpRequest<T>(options: HttpRequestOptions): Promise<T> {
 }
 
 /**
- * 轻量 HTTPS GET，返回 JSON
+ * 轻量 HTTP(S) GET，返回 JSON
  */
 export function getJson<T>(
 	url: string,
@@ -182,7 +185,7 @@ export function getJson<T>(
 }
 
 /**
- * 轻量 HTTPS POST，返回 JSON
+ * 轻量 HTTP(S) POST，返回 JSON
  */
 export function postJson<T>(
 	url: string,

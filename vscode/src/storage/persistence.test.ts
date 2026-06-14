@@ -1,6 +1,30 @@
 import { describe, it, expect } from 'vitest';
-import { attachHistory } from './persistence';
-import { ServiceData, UsagePoint } from '../core/types';
+import { attachHistory, saveHistory } from './persistence';
+import { ServiceData, ServiceProfile, UsagePoint } from '../core/types';
+
+function createMockContext(initial: Record<string, unknown> = {}): any {
+	const storage: Record<string, unknown> = { ...initial };
+	return {
+		globalState: {
+			get: <T>(key: string, defaultValue?: T): T | undefined => {
+				return storage[key] !== undefined ? (storage[key] as T) : defaultValue;
+			},
+			update: async (key: string, value: unknown) => {
+				if (value === undefined) {
+					delete storage[key];
+				} else {
+					storage[key] = value;
+				}
+			},
+			keys: () => Object.keys(storage),
+		},
+		secrets: {
+			get: async () => undefined,
+			store: async () => {},
+			delete: async () => {},
+		},
+	};
+}
 
 describe('attachHistory', () => {
 	it('returns data with empty history when no saved history exists', () => {
@@ -64,5 +88,31 @@ describe('attachHistory', () => {
 
 		const result = attachHistory(data, historyMap);
 		expect(result.history).toBeUndefined();
+	});
+});
+
+describe('saveHistory', () => {
+	it('cleans history for removed services when profiles provided', async () => {
+		const ctx = createMockContext({
+			'aiQuotaDashboard.history': {
+				'old-service': [{ at: Date.now(), tokens: 10, calls: 1 }],
+				'keep-service': [{ at: Date.now(), tokens: 20, calls: 1 }],
+			},
+		});
+
+		const data: ServiceData = {
+			id: 'keep-service',
+			name: 'Keep',
+			kind: 'test',
+			slots: [{ label: 'Test', percent: 50, used: 100, limit: 200 }],
+			updatedAt: Date.now(),
+		};
+
+		const profiles: ServiceProfile[] = [{ id: 'keep-service', kind: 'test', displayName: 'Keep', dataSource: 'manual' }];
+
+		await saveHistory(ctx, new Map([['keep-service', data]]), profiles);
+
+		const stored = ctx.globalState.get('aiQuotaDashboard.history', {}) as Record<string, UsagePoint[]>;
+		expect(Object.keys(stored)).toEqual(['keep-service']);
 	});
 });

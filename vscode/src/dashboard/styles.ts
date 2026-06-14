@@ -50,10 +50,12 @@ export function getStyles(): string {
 	.update-time { font-size: 10px; color: var(--vscode-descriptionForeground); margin-left: auto; }
 	.badge { padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 500; }
 	.badge-error { background: var(--vscode-charts-red); color: white; }
+	.badge-bridge { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 	.error-message { color: var(--vscode-charts-red); font-size: 12px; }
 
 	/* Service kind badge (通用) */
 	.badge-kind { font-size: 9px; padding: 1px 5px; border-radius: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+	.badge-bridge { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 
 	.slot { margin-bottom: 10px; }
 	.slot:last-child { margin-bottom: 0; }

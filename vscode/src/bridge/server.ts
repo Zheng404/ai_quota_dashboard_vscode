@@ -16,10 +16,6 @@ function getPortFilePath(): string {
 	return path.join(os.tmpdir(), `.ai-quota-bridge-port-${process.pid}`);
 }
 
-/** 生成通用端口文件路径（供浏览器扩展发现） */
-function getGenericPortFilePath(): string {
-	return path.join(os.tmpdir(), '.ai-quota-bridge-port');
-}
 
 /** 浏览器扩展推送的 Cookie 数据 */
 export interface CookiePayload {
@@ -37,6 +33,8 @@ export interface CookiePayload {
 	mimoCookie?: string;
 	/** GLM API Key */
 	glmApiKey?: string;
+	/** 浏览器扩展当前活跃的服务 kind 列表，用于 VSCode 端同步移除服务 */
+	activeKinds?: string[];
 }
 
 /** Cookie 接收回调 */
@@ -114,11 +112,9 @@ export class CookieBridgeServer {
 		}
 		this.port = addr.port;
 
-		// 写入端口文件供浏览器扩展发现（带 PID 后缀避免多实例冲突）
+		// 写入 PID 端口文件供调试和进程管理（不再写通用端口文件，避免多实例冲突）
 		try {
 			fs.writeFileSync(this.portFile, String(this.port), { mode: 0o600 });
-			// 同时写入通用端口文件（供浏览器扩展快速发现）
-			fs.writeFileSync(getGenericPortFilePath(), String(this.port), { mode: 0o600 });
 		} catch {
 			this.log(`无法写入端口文件: ${this.portFile}`);
 		}
@@ -129,39 +125,41 @@ export class CookieBridgeServer {
 	}
 
 	private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-		// CORS: 允许 chrome-extension 来源
+		// CORS: 仅允许浏览器扩展来源（chrome-extension:// / moz-extension://）
 		const origin = req.headers.origin ?? '';
-		if (origin.startsWith('chrome-extension://') || origin === '') {
-			res.setHeader('Access-Control-Allow-Origin', origin || '*');
+		const isBrowserExtension = origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://');
+		if (isBrowserExtension) {
+			res.setHeader('Access-Control-Allow-Origin', origin);
 		}
 		res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
 		res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Auth-Token');
 
-		// Preflight
+		// Preflight（仅浏览器扩展可访问）
 		if (req.method === 'OPTIONS') {
-			res.writeHead(204);
+			res.writeHead(isBrowserExtension ? 204 : 403);
 			res.end();
 			return;
 		}
 
-		// 健康检查（无需认证，返回 authToken 供浏览器扩展使用）
-		// SECURITY NOTE: 此处返回 authToken 是一个已知限制。浏览器扩展需要通过 /health
-		// 获取 authToken 才能访问后续受保护端点。由于通信仅限本地 (127.0.0.1)，
-		// 这种暴露是可接受的。若未来协议变更，应通过其他安全机制传递 token。
-		if (req.url === '/health' && req.method === 'GET') {
-			res.writeHead(200, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ status: 'ok', port: this.port, authToken: this.authToken }));
-			return;
-		}
+	// 健康检查（无需认证）
+	// 始终返回 authToken：本地 127.0.0.1 服务器，Chrome MV3 Service Worker fetch
+	// 可能不携带 Origin header，导致 isBrowserExtension 判断失败
+	if (req.url === '/health' && req.method === 'GET') {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ status: 'ok', port: this.port, authToken: this.authToken }));
+		return;
+	}
 
-		// 认证检查
-		const rawToken = req.headers['x-auth-token'];
-		const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
-		if (token !== this.authToken) {
-			res.writeHead(401, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Unauthorized' }));
-			return;
-		}
+	// 认证检查
+	const rawToken = req.headers['x-auth-token'];
+	const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+	if (token !== this.authToken) {
+		const origin = req.headers.origin ?? '(none)';
+		this.log(`认证失败: origin=${origin}, token=${token ? String(token).substring(0, 8) + '...' : '(missing)'}`);
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
 
 		// Cookie 接收端点
 		if (req.url === '/cookies' && req.method === 'POST') {
@@ -192,8 +190,13 @@ export class CookieBridgeServer {
 					const body = Buffer.concat(chunks).toString('utf-8');
 					const payload: CookiePayload = JSON.parse(body);
 
-					if (payload.cookies && payload.cookies.length > 0) {
-						this.log(`收到 ${payload.cookies.length} 条 Cookie (来源: ${payload.source})`);
+					const hasCredentials = (payload.cookies && payload.cookies.length > 0)
+						|| !!payload.kimiAuthToken
+						|| !!payload.mimoCookie
+						|| !!payload.glmApiKey;
+
+					if (hasCredentials) {
+						this.log(`收到凭证推送 (来源: ${payload.source}, cookies=${payload.cookies?.length ?? 0}, kimi=${!!payload.kimiAuthToken}, mimo=${!!payload.mimoCookie}, glm=${!!payload.glmApiKey})`);
 						this.onReceived(payload);
 					}
 
@@ -228,7 +231,6 @@ export class CookieBridgeServer {
 			});
 		}
 		try { fs.unlinkSync(this.portFile); } catch { /* ignore */ }
-		try { fs.unlinkSync(getGenericPortFilePath()); } catch { /* ignore */ }
 		this.log('Cookie Bridge 已停止');
 	}
 }

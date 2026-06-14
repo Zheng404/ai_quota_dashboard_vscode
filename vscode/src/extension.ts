@@ -10,6 +10,7 @@ import { AfkDetector } from './core/afk';
 import { resolveProvider, isValidServiceId, getDescriptor, getAllDescriptors } from './services/registry';
 import { CookieBridgeServer } from './bridge/server';
 import type { CookiePayload } from './bridge/server';
+import { setBridgeExtensionContext, updateBridgeState } from './services/bridge/state';
 
 let timer: NodeJS.Timeout | undefined;
 
@@ -19,6 +20,38 @@ let dashboardViewProvider!: DashboardWebviewViewProvider;
 const afkDetector = new AfkDetector();
 let bridge: CookieBridgeServer | undefined;
 let isLoopRunning = false;
+
+// ===== 配额预警 =====
+
+/** 预警通知冷却时间（30 分钟），避免每次轮询都弹通知 */
+const WARNING_COOLDOWN_MS = 30 * 60 * 1000;
+let lastWarningTime = 0;
+
+/** 检查所有服务的配额使用率，超过 warnThreshold 时弹出 VSCode 警告通知 */
+function checkQuotaWarnings(): void {
+	const threshold = config.warnThreshold();
+	if (threshold <= 0 || threshold >= 1) { return; } // 阈值无效则跳过
+
+	const now = Date.now();
+	if (now - lastWarningTime < WARNING_COOLDOWN_MS) { return; } // 冷却期内跳过
+
+	const warnings: string[] = [];
+	for (const [, data] of serviceData) {
+		if (data.err || data.slots.length === 0) { continue; }
+		// 前置条件：slots.length > 0，Math.max 参数非空
+		const maxPercent = Math.max(...data.slots.map(s => s.percent));
+		if (maxPercent >= threshold * 100) {
+			warnings.push(`${data.name}: ${maxPercent.toFixed(0)}% 已使用`);
+		}
+	}
+
+	if (warnings.length > 0) {
+		lastWarningTime = now;
+		vscode.window.showWarningMessage(
+			`配额预警 (≥${(threshold * 100).toFixed(0)}%): ${warnings.join('、')}`,
+		);
+	}
+}
 
 /** 串行任务队列，防止 pullService / pullAll / afterConfigChange 并发 */
 class AsyncQueue {
@@ -32,6 +65,7 @@ class AsyncQueue {
 }
 
 const refreshQueue = new AsyncQueue();
+const bridgeQueue = new AsyncQueue();
 
 // OutputChannel 用于替代 console.log/error
 const outputChannel = vscode.window.createOutputChannel('AI Quota Dashboard');
@@ -154,11 +188,13 @@ async function doPullAll(bar: StatusBar, ctx: vscode.ExtensionContext): Promise<
 	}
 
 	// 统一渲染
-	if (hasResult) {
-		bar.flush();
-		await updateView();
-		await saveHistory(ctx, serviceData);
-	} else {
+		if (hasResult) {
+			bar.flush();
+			await updateView();
+			await saveHistory(ctx, serviceData, config.loadProfiles());
+			// 配额预警检查
+			checkQuotaWarnings();
+		} else {
 		bar.setEmpty();
 		await updateView();
 	}
@@ -311,7 +347,7 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const defaultKind = getAllDescriptors()[0]?.kind ?? 'glm';
 			const kind = isValidServiceId(d.kind) ? d.kind : defaultKind;
 			const key = typeof d.key === 'string' ? d.key : '';
-			const dataSource = d.dataSource === 'bridge' ? 'bridge' : 'manual';
+			const dataSource = (kind === 'bridge' ? 'bridge' : (d.dataSource === 'bridge' ? 'bridge' : 'manual')) as 'manual' | 'bridge';
 			if (!id) { return; }
 			await config.updateService(id, { displayName: name });
 			// 仅在 kind 真正变化时才清空并重新设置 key，避免非原子操作丢 Key
@@ -327,7 +363,7 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			}
 			// 更新数据来源模式
 			await config.updateServiceDataSource(id, dataSource);
-			// 手动模式才保存 key，bridge 模式 key 由浏览器扩展自动管理
+			// Bridge 服务不保存 key；AI 服务保存手动输入的 key
 			if (dataSource === 'manual') {
 				await config.updateServiceKey(id, key);
 			}
@@ -428,56 +464,166 @@ async function startPolling(loop: () => Promise<void>) {
 	restartTimer(loop);
 }
 
+/**
+ * 根据浏览器扩展推送的活跃 kind 列表同步移除 VSCode 中多余的 AI 服务。
+ * 仅移除 dataSource='bridge' 的服务，避免误删用户手动添加的服务。
+ * Bridge 服务自身不受影响。
+ */
+async function syncRemoveBridgeServices(profiles: ServiceProfile[], activeKinds: string[]): Promise<ServiceProfile[]> {
+	const activeSet = new Set(activeKinds);
+	const toRemove = profiles.filter(p =>
+		BRIDGE_AI_KINDS.has(p.kind) &&
+		p.dataSource === 'bridge' &&
+		!activeSet.has(p.kind)
+	);
+
+	if (toRemove.length === 0) {
+		return profiles;
+	}
+
+	const removeIds = new Set(toRemove.map(p => p.id));
+	for (const p of toRemove) {
+		await config.removeService(p.id);
+		log(`[Bridge] 浏览器已移除 ${p.kind}，同步删除 VSCode 服务: ${p.displayName} (${p.id})`);
+	}
+
+	return config.loadProfiles().filter(p => !removeIds.has(p.id));
+}
+
 // ====== Cookie Bridge ======
+
+/** Bridge 自动创建的 AI 服务 kind 集合 */
+const BRIDGE_AI_KINDS = new Set(['glm', 'kimi', 'mimo']);
+
+/**
+ * 对 AI 服务 profiles 按 kind 去重。
+ * 如果同一 kind 存在多个服务，保留 dataSource='bridge' 的优先；否则保留第一个。
+ * 返回去重后的 profiles，并删除被移除服务的 Secret Storage 凭证。
+ */
+async function deduplicateAiProfiles(profiles: ServiceProfile[]): Promise<ServiceProfile[]> {
+	const keepers = new Map<string, ServiceProfile>();
+	const toRemove: ServiceProfile[] = [];
+
+	for (const p of profiles) {
+		if (!BRIDGE_AI_KINDS.has(p.kind)) { continue; }
+		const existing = keepers.get(p.kind);
+		if (existing) {
+			// 保留 bridge 数据源；如果都不是 bridge，保留已存在的（先来者）
+			if (p.dataSource === 'bridge' && existing.dataSource !== 'bridge') {
+				toRemove.push(existing);
+				keepers.set(p.kind, p);
+			} else {
+				toRemove.push(p);
+			}
+		} else {
+			keepers.set(p.kind, p);
+		}
+	}
+
+	if (toRemove.length === 0) {
+		return profiles;
+	}
+
+	const removeIds = new Set(toRemove.map(p => p.id));
+	for (const p of toRemove) {
+		await config.removeService(p.id);
+		log(`[Bridge] 移除重复的 ${p.kind} 服务: ${p.displayName} (${p.id})`);
+	}
+
+	return config.loadProfiles().filter(p => !removeIds.has(p.id));
+}
+
 async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
-	bridge = new CookieBridgeServer(async (payload: CookiePayload) => {
-		log(`[Bridge] 收到 ${payload.cookies?.length ?? 0} 条 Cookie`);
-		let updated = false;
+	setBridgeExtensionContext(ctx);
 
-		// Kimi: kimi-auth → 更新 bridge 模式的 Kimi 服务
-		if (payload.kimiAuthToken) {
-			const profiles = config.loadProfiles().filter(p => p.kind === 'kimi' && p.dataSource === 'bridge');
-			for (const p of profiles) {
-				const oldKey = await config.getKey(p.id);
-				if (oldKey !== payload.kimiAuthToken) {
-					await config.updateServiceKey(p.id, payload.kimiAuthToken);
-					log(`[Bridge] Kimi 凭证已更新: ${p.id}`);
-					updated = true;
+	bridge = new CookieBridgeServer((payload: CookiePayload) => {
+		bridgeQueue.enqueue(async () => {
+			log(`[Bridge] 收到凭证推送 (cookies=${payload.cookies?.length ?? 0}, kimi=${!!payload.kimiAuthToken}, mimo=${!!payload.mimoCookie}, glm=${!!payload.glmApiKey})`);
+
+			// 收集已接收的凭证种类
+			const receivedCredentials: string[] = [];
+			if (payload.kimiAuthToken) { receivedCredentials.push('kimi'); }
+			if (payload.mimoCookie) { receivedCredentials.push('mimo'); }
+			if (payload.glmApiKey) { receivedCredentials.push('glm'); }
+
+			// 更新 Bridge 服务状态
+			await updateBridgeState({
+				lastPushAt: payload.timestamp,
+				receivedCredentials,
+				connected: true,
+				lastError: undefined,
+			});
+
+			// 分发凭证到对应的 AI 服务（自动写入 Secret Storage 并标记 dataSource='bridge'）
+			// 如果对应的 AI 服务不存在，自动创建
+			let profiles = config.loadProfiles();
+			// 先去重：同一 kind 的 AI 服务只保留一个，避免 Bridge 多次推送后产生重复服务
+			profiles = await deduplicateAiProfiles(profiles);
+			// 同步移除：浏览器扩展已删除的服务，在 VSCode 端也删除
+			profiles = await syncRemoveBridgeServices(profiles, payload.activeKinds ?? []);
+
+			const credentialMap: Array<{ kind: string; value: string | undefined }> = [
+				{ kind: 'kimi', value: payload.kimiAuthToken },
+				{ kind: 'mimo', value: payload.mimoCookie },
+				{ kind: 'glm', value: payload.glmApiKey },
+			];
+			let distributed = false;
+			for (const { kind, value } of credentialMap) {
+				if (!value) { continue; }
+				// 每次循环重新加载，确保看到最新状态
+				profiles = config.loadProfiles();
+				const existing = profiles.find(x => x.kind === kind);
+				if (existing) {
+					// 已有对应服务，更新凭证
+					await config.updateServiceKey(existing.id, value);
+					await config.updateServiceDataSource(existing.id, 'bridge');
+					log(`[Bridge] 凭证已分发到 ${existing.displayName} (${kind})`);
+				} else {
+					// 自动创建对应 AI 服务；创建前双重检查，防止并发/队列间隙产生重复
+					try {
+						const doubleCheck = config.loadProfiles().find(x => x.kind === kind);
+						if (doubleCheck) {
+							await config.updateServiceKey(doubleCheck.id, value);
+							await config.updateServiceDataSource(doubleCheck.id, 'bridge');
+							log(`[Bridge] 凭证已分发到 ${doubleCheck.displayName} (${kind})`);
+						} else {
+							const descriptor = getDescriptor(kind);
+							const displayName = descriptor?.displayName ?? kind;
+							const newId = await config.addService(kind, displayName);
+							await config.updateServiceKey(newId, value);
+							await config.updateServiceDataSource(newId, 'bridge');
+							log(`[Bridge] 自动创建 ${displayName} 服务并分发凭证 (${kind})`);
+						}
+					} catch (e) {
+						logError(`[Bridge] 自动创建 ${kind} 服务失败`, e);
+					}
+				}
+				distributed = true;
+			}
+
+			// 更新 Bridge 服务自身视图
+			profiles = config.loadProfiles();
+			const bridgeProfile = profiles.find(p => p.kind === 'bridge');
+			if (bridgeProfile) {
+				await config.updateServiceKey(bridgeProfile.id, 'connected');
+			}
+
+			// 清除缓存并刷新所有服务（Bridge 推送的新凭证需要生效）
+			if (distributed || bridgeProfile) {
+				cache.clear();
+				// 服务列表可能已变化，清空旧 serviceData 并立即更新视图，避免残留/缺失卡片
+				serviceData.clear();
+				bar.clear();
+				await updateView();
+				try {
+					await pullAll(bar, ctx);
+				} catch (err) {
+					logError('[Bridge] pullAll 刷新失败，已更新视图', err);
+					// 即使拉取失败，也确保视图与当前 profiles 保持一致
+					await updateView();
 				}
 			}
-		}
-
-		// MiMo: Cookie 字符串 → 更新 bridge 模式的 MiMo 服务
-		if (payload.mimoCookie) {
-			const profiles = config.loadProfiles().filter(p => p.kind === 'mimo' && p.dataSource === 'bridge');
-			for (const p of profiles) {
-				const oldKey = await config.getKey(p.id);
-				if (oldKey !== payload.mimoCookie) {
-					await config.updateServiceKey(p.id, payload.mimoCookie);
-					log(`[Bridge] MiMo 凭证已更新: ${p.id}`);
-					updated = true;
-				}
-			}
-		}
-
-		// GLM: API Key → 更新 bridge 模式的 GLM 服务
-		if (payload.glmApiKey) {
-			const profiles = config.loadProfiles().filter(p => p.kind === 'glm' && p.dataSource === 'bridge');
-			for (const p of profiles) {
-				const oldKey = await config.getKey(p.id);
-				if (oldKey !== payload.glmApiKey) {
-					await config.updateServiceKey(p.id, payload.glmApiKey);
-					log(`[Bridge] GLM 凭证已更新: ${p.id}`);
-					updated = true;
-				}
-			}
-		}
-
-		// 有更新时自动刷新数据
-		if (updated) {
-			cache.clear();
-			await pullAll(bar, ctx);
-		}
+		});
 	}, outputChannel);
 
 	try {
@@ -485,57 +631,65 @@ async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
 		log(`Cookie Bridge 已启动，监听端口: ${port}`);
 	} catch (err) {
 		logError('Cookie Bridge 启动失败', err);
+		await updateBridgeState({ connected: false, lastError: `启动失败: ${err instanceof Error ? err.message : String(err)}` });
 	}
 
 	ctx.subscriptions.push(bridge);
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
-	log('activate');
+	try {
+		log('activate');
 
 	config.setContext(ctx);
 	await config.initDefaults();
+	await config.migrateBridgeDataSource();
 
-	const bar = new StatusBar();
-	ctx.subscriptions.push(bar);
+		const bar = new StatusBar();
+		ctx.subscriptions.push(bar);
 
-	// 注册内置命令
-	for (const cmd of registerAll(ctx)) {
-		ctx.subscriptions.push(cmd);
+		// 注册内置命令
+		for (const cmd of registerAll(ctx)) {
+			ctx.subscriptions.push(cmd);
+		}
+
+		// 定义轮询函数（供命令和轮询共用）
+		const loop = async () => {
+			if (isLoopRunning) {
+				log('上轮数据刷新尚未完成，跳过本次刷新');
+				return;
+			}
+			isLoopRunning = true;
+			try {
+				await pullAll(bar, ctx);
+			} catch (err) {
+				logError('数据刷新异常', err);
+			} finally {
+				isLoopRunning = false;
+			}
+		};
+
+		// 设置各子系统
+		setupWebview(ctx);
+		registerDataCommands(ctx, bar);
+		registerServiceCommands(ctx, bar);
+		registerSettingsCommands(ctx, bar, loop);
+		registerNavigationCommands(ctx);
+		setupActivityListeners(ctx);
+
+		// Cookie Bridge（浏览器扩展伴侣）
+		await setupBridge(ctx, bar);
+
+		// 同步初始活动时间，避免启动时误判 AFK
+		afkDetector.updateActivity();
+
+		// 启动轮询
+		await startPolling(loop);
+	} catch (err) {
+		logError('扩展激活失败', err);
+		vscode.window.showErrorMessage(`AI Quota Dashboard 激活失败: ${err instanceof Error ? err.message : String(err)}`);
+		throw err;
 	}
-
-	// 定义轮询函数（供命令和轮询共用）
-	const loop = async () => {
-		if (isLoopRunning) {
-			log('上轮数据刷新尚未完成，跳过本次刷新');
-			return;
-		}
-		isLoopRunning = true;
-		try {
-			await pullAll(bar, ctx);
-		} catch (err) {
-			logError('数据刷新异常', err);
-		} finally {
-			isLoopRunning = false;
-		}
-	};
-
-	// 设置各子系统
-	setupWebview(ctx);
-	registerDataCommands(ctx, bar);
-	registerServiceCommands(ctx, bar);
-	registerSettingsCommands(ctx, bar, loop);
-	registerNavigationCommands(ctx);
-	setupActivityListeners(ctx);
-
-	// Cookie Bridge（浏览器扩展伴侣）
-	await setupBridge(ctx, bar);
-
-	// 同步初始活动时间，避免启动时误判 AFK
-	afkDetector.updateActivity();
-
-	// 启动轮询
-	await startPolling(loop);
 }
 
 export async function deactivate(): Promise<void> {

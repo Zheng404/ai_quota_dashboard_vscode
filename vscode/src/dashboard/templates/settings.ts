@@ -27,11 +27,11 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 		const meta = getServiceSettings(p.kind);
 		const placeholder = meta ? meta.keyPlaceholder : 'API Key';
 		const key = keys[p.id] || '';
-		const dataSource = p.dataSource || 'manual';
-		const isBridge = dataSource === 'bridge';
+		const isBridgeService = p.kind === 'bridge';
+		const isBridgePushed = !isBridgeService && p.dataSource === 'bridge';
 
 		let hintHtml = '';
-		if (meta && meta.keyHint && !isBridge) {
+		if (meta && meta.keyHint && !isBridgeService && !isBridgePushed) {
 			hintHtml = '<div class="form-row-hint"><span class="form-hint">' + escapeHtml(meta.keyHint) + '</span>';
 			if (meta.showHelpButton) {
 				hintHtml += '<button type="button" class="btn btn-link svc-help-btn" data-help-cmd="' + meta.helpCommand + '">如何获取密钥？</button>';
@@ -41,19 +41,18 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 
 		const kindLabel = meta ? meta.displayName : p.kind;
 
-		// 数据来源选择器
-		const dsSelect = '<div class="svc-row-datasource"><label class="form-label">认证方式</label><select class="form-input svc-datasource" data-id="' + escapeHtml(p.id) + '"><option value="manual"' + (dataSource === 'manual' ? ' selected' : '') + '>手动输入</option><option value="bridge"' + (dataSource === 'bridge' ? ' selected' : '') + '>Cookie Bridge 自动获取</option></select></div>';
-
-		// Key 输入框（手动模式显示，bridge 模式显示状态）
-		let keyHtml = '';
-		if (isBridge) {
+		// 认证方式：Bridge 服务 / AI 服务（Bridge 推送 / 手动输入）
+		let authHtml = '';
+		if (isBridgeService) {
 			const hasKey = key.length > 0;
-			keyHtml = '<div class="svc-bridge-status"><span class="bridge-badge ' + (hasKey ? 'connected' : 'disconnected') + '">' + (hasKey ? '已通过浏览器扩展获取' : '等待浏览器扩展推送凭证...') + '</span></div>';
+			authHtml = '<div class="svc-row-datasource"><label class="form-label">认证方式</label><div class="form-hint">Cookie Bridge 自动获取</div></div><div class="svc-bridge-status"><span class="bridge-badge ' + (hasKey ? 'connected' : 'disconnected') + '">' + (hasKey ? '已通过浏览器扩展获取' : '等待浏览器扩展推送凭证...') + '</span></div>';
+		} else if (isBridgePushed) {
+			authHtml = '<div class="svc-row-datasource"><label class="form-label">认证方式</label><div class="form-hint">Cookie Bridge 自动推送</div></div><div class="svc-bridge-status"><span class="bridge-badge connected">已通过浏览器扩展获取</span> <button type="button" class="btn btn-link svc-switch-manual-btn">切换为手动输入</button></div>';
 		} else {
-			keyHtml = '<input type="text" class="form-input svc-key" placeholder="' + escapeHtml(placeholder) + '" value="' + escapeHtml(key) + '" autocomplete="off">' + hintHtml;
+			authHtml = '<div class="svc-row-datasource"><label class="form-label">认证方式</label><div class="form-hint">手动输入</div></div><input type="text" class="form-input svc-key" placeholder="' + escapeHtml(placeholder) + '" value="' + escapeHtml(key) + '" autocomplete="off">' + hintHtml;
 		}
 
-		return '<div class="service-item" data-id="' + escapeHtml(p.id) + '"><div class="svc-row-kind"><span class="svc-kind-label" data-kind="' + escapeHtml(p.kind) + '">' + escapeHtml(kindLabel) + '</span></div><div class="svc-row-name"><input type="text" class="form-input svc-name" value="' + escapeHtml(p.displayName) + '" placeholder="显示名称"></div>' + dsSelect + keyHtml + '<div class="svc-row-actions"><button type="button" class="btn btn-sm btn-delete remove-service-btn">移除服务</button><button type="button" class="btn btn-sm btn-primary save-service-btn">保存配置</button></div></div>';
+		return '<div class="service-item" data-id="' + escapeHtml(p.id) + '" data-datasource="' + escapeHtml(p.dataSource || 'manual') + '"><div class="svc-row-kind"><span class="svc-kind-label" data-kind="' + escapeHtml(p.kind) + '">' + escapeHtml(kindLabel) + '</span></div><div class="svc-row-name"><input type="text" class="form-input svc-name" value="' + escapeHtml(p.displayName) + '" placeholder="显示名称"></div>' + authHtml + '<div class="svc-row-actions"><button type="button" class="btn btn-sm btn-delete remove-service-btn">移除服务</button><button type="button" class="btn btn-sm btn-primary save-service-btn">保存配置</button></div></div>';
 	}
 
 	function renderServiceListSettings(settings) {
@@ -87,16 +86,36 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 			el.addEventListener('click', () => {
 				const item = el.closest('.service-item');
 				if (!item) return;
-				const dsSelect = item.querySelector('.svc-datasource');
-				const dataSource = dsSelect ? dsSelect.value : 'manual';
+				const kind = item.querySelector('.svc-kind-label')?.dataset.kind || serviceSettingsMap[0]?.kind || '';
+				// 从 DOM 读取 dataSource（Bridge 推送后可能为 'bridge'）
+				const dataSource = kind === 'bridge' ? 'bridge' : (item.dataset.datasource || 'manual');
 				vscode.postMessage({
 					command: 'saveService',
 					data: {
 						id: item.dataset.id,
 						name: item.querySelector('.svc-name').value,
-						kind: item.querySelector('.svc-kind-label')?.dataset.kind || serviceSettingsMap[0]?.kind || '',
+						kind,
 						key: item.querySelector('.svc-key')?.value || '',
-						dataSource: dataSource
+						dataSource
+					}
+				});
+			});
+		});
+
+		// "切换为手动输入"：将 dataSource 改回 manual 并清空 key
+		document.querySelectorAll('.svc-switch-manual-btn').forEach(el => {
+			el.addEventListener('click', () => {
+				const item = el.closest('.service-item');
+				if (!item) return;
+				const kind = item.querySelector('.svc-kind-label')?.dataset.kind || serviceSettingsMap[0]?.kind || '';
+				vscode.postMessage({
+					command: 'saveService',
+					data: {
+						id: item.dataset.id,
+						name: item.querySelector('.svc-name').value,
+						kind,
+						key: '',
+						dataSource: 'manual'
 					}
 				});
 			});
@@ -203,8 +222,28 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 				if (el.dataset.serviceId) spinningIds.add(el.dataset.serviceId);
 			});
 
-			const hasConfig = services.length > 0;
-			dashboardPanel.innerHTML = hasConfig ? services.map(s => renderService(s)).join('') : renderNoConfig();
+			// 基于 profiles 渲染卡片框架，保证服务列表变化即时反映；
+			// 用 services 填充实际数据，未拉取到数据的服务显示 loading/错误占位。
+			const profiles = (settings.profiles || []).filter(p => p.kind !== 'bridge');
+			const servicesMap = new Map();
+			(services || []).forEach(s => servicesMap.set(s.id, s));
+
+			const visibleServices = profiles.map(p => {
+				const data = servicesMap.get(p.id);
+				if (data) return data;
+				// 占位：服务存在但暂无数据
+				return {
+					id: p.id,
+					name: p.displayName,
+					kind: p.kind,
+					slots: [],
+					updatedAt: Date.now(),
+					err: '数据加载中，请稍后...',
+				};
+			});
+
+			const hasConfig = visibleServices.length > 0;
+			dashboardPanel.innerHTML = hasConfig ? visibleServices.map(s => renderService(s)).join('') : renderNoConfig();
 			bindRefreshButtons();
 
 			// 恢复 spinning 状态
