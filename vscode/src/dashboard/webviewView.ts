@@ -107,7 +107,7 @@ export class DashboardWebviewViewProvider
     }
   }
 
-  switchToSettings(subtab: string = 'services') {
+  switchToSettings(subtab: 'services' | 'global' = 'services') {
     if (this.view) {
       this.view.webview.postMessage({
         command: 'switchToSettings',
@@ -137,19 +137,14 @@ ${getStyles()}
 <div class="container">
 	<div class="tabs">
 		<button class="tab-btn active" data-tab="dashboard">仪表盘</button>
-		<button class="tab-btn" data-tab="settings">设置</button>
+		<button class="tab-btn" data-tab="services">服务</button>
+		<button class="tab-btn" data-tab="global">设置</button>
 	</div>
 	<div class="tab-panel active" id="panel-dashboard">
 		<div class="empty-state"><p>加载中...</p></div>
 	</div>
-	<div class="tab-panel" id="panel-settings">
-		<div class="sub-tabs">
-			<button class="sub-tab-btn active" data-subtab="services">服务列表</button>
-			<button class="sub-tab-btn" data-subtab="global">全局设置</button>
-		</div>
-		<div class="sub-tab-panel active" id="subpanel-services"></div>
-		<div class="sub-tab-panel" id="subpanel-global"></div>
-	</div>
+	<div class="tab-panel" id="panel-services"></div>
+	<div class="tab-panel" id="panel-global"></div>
 </div>
 <script>
 (function() {

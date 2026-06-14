@@ -35,8 +35,8 @@ const settingsBtn = document.getElementById('btn-settings');
 const lastUpdateEl = document.getElementById('last-update');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const tabPanels = document.querySelectorAll('.tab-panel');
-const subTabBtns = document.querySelectorAll('.sub-tab-btn');
-const subTabPanels = document.querySelectorAll('.sub-tab-panel');
+const settingsServicesEl = document.getElementById('panel-services');
+const settingsGlobalEl = document.getElementById('panel-global');
 const settingsServicesEl = document.getElementById('settings-services');
 const settingsGlobalEl = document.getElementById('settings-global');
 
@@ -45,7 +45,6 @@ const settingsGlobalEl = document.getElementById('settings-global');
 let serviceDataMap = new Map();
 let isLoading = false;
 let currentTab = 'dashboard';
-let currentSubTab = '';
 // config 从 config.js 导入（共享配置模块）
 
 // 配置管理和缓存函数从 config.js / cache.js 导入
@@ -293,18 +292,12 @@ function handleTabSwitch(e) {
 	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
 	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === `panel-${tab}`));
 
-	if (tab === 'settings') {
-		renderSettings();
+	// 切换到「服务」或「设置」面板时按需渲染
+	if (tab === 'services') {
+		renderSettingsServices();
+	} else if (tab === 'global') {
+		renderSettingsGlobal();
 	}
-}
-
-function handleSubTabSwitch(e) {
-	const subtab = e.target.dataset.subtab;
-	if (!subtab) return;
-
-	currentSubTab = subtab;
-	subTabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.subtab === subtab));
-	subTabPanels.forEach(panel => panel.classList.toggle('active', panel.id === `subpanel-${subtab}`));
 }
 
 async function handleGlmMainTabClick(e) {
@@ -440,13 +433,13 @@ servicesEl.addEventListener('click', (e) => {
 });
 
 tabBtns.forEach(btn => btn.addEventListener('click', handleTabSwitch));
-subTabBtns.forEach(btn => btn.addEventListener('click', handleSubTabSwitch));
 refreshBtn.addEventListener('click', () => loadAll(true));
 settingsBtn.addEventListener('click', () => {
-	currentTab = 'settings';
-	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'settings'));
-	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === 'panel-settings'));
-	renderSettings();
+	// 设置按钮跳转到「服务」标签页（管理服务配置）
+	currentTab = 'services';
+	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'services'));
+	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === 'panel-services'));
+	renderSettingsServices();
 });
 
 // ===== Cookie 变化即时刷新 =====

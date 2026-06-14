@@ -35,9 +35,9 @@ export function getBridgeTemplate(): string {
 			: '<div class="bridge-info-row"><span class="bridge-info-label">最后同步：</span><span class="bridge-info-value">暂无</span></div>';
 
 		const credLabels = {
-			kimiAuthToken: 'Kimi',
-			mimoCookie: 'MiMo',
-			glmApiKey: 'GLM'
+			kimi: 'Kimi',
+			mimo: 'MiMo',
+			glm: 'GLM'
 		};
 
 		let credsHtml = '';
@@ -58,7 +58,7 @@ export function getBridgeTemplate(): string {
 
 		return '<div class="bridge-status-section">' +
 			lastPush +
-			'<div class="bridge-info-row"><span class="bridge-info-label">已接收凭证：</span></div>' +
+			'<div class="bridge-info-row"><span class="bridge-info-label">已连接服务：</span></div>' +
 			credsHtml +
 			errorHtml +
 			'<div class="bridge-hint">浏览器扩展推送的凭证将自动分发到对应的 Kimi / MiMo / GLM 服务。</div>' +

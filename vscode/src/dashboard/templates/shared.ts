@@ -24,7 +24,7 @@ export function getSharedScript(): string {
 	// ====== 共享渲染器 ======
 
 	function renderNoConfig() {
-		return '<div class="empty-state"><div class="empty-icon">\\u{1F4CA}</div><p class="empty-title">暂无服务数据</p><p class="empty-hint">切换到「设置」标签页添加服务</p></div>';
+		return '<div class="empty-state"><div class="empty-icon">\\u{1F4CA}</div><p class="empty-title">暂无服务数据</p><p class="empty-hint">切换到「服务」标签页添加服务</p></div>';
 	}
 
 	function renderErrorCard(data) {

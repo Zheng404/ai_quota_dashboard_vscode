@@ -47,10 +47,8 @@ const settingsBtn = document.getElementById('btn-settings');
 const lastUpdateEl = document.getElementById('last-update');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const tabPanels = document.querySelectorAll('.tab-panel');
-const subTabBtns = document.querySelectorAll('.sub-tab-btn');
-const subTabPanels = document.querySelectorAll('.sub-tab-panel');
-const settingsServicesEl = document.getElementById('subpanel-services');
-const settingsGlobalEl = document.getElementById('subpanel-global');
+const settingsServicesEl = document.getElementById('panel-services');
+const settingsGlobalEl = document.getElementById('panel-global');
 
 // ===== 状态 =====
 
@@ -64,7 +62,6 @@ let bridgeStatus = {
 // config 从 config.js 导入
 
 let currentTab = 'dashboard';
-let currentSubTab = 'services';
 let refreshTimer = null;
 
 // ===== Cookie Bridge 状态检测 =====
@@ -369,7 +366,10 @@ function renderSettingsServices() {
 						</p>
 						${svc.kind === 'kimi' || svc.kind === 'mimo' ? `
 						<div style="margin-top: 8px; padding: 8px; background: #fef9c3; border-radius: 4px; font-size: 11px; color: #854d0e;">
-							${SERVICE_LABELS[svc.kind]} 的登录 Cookie 是 session cookie，浏览器重启后需重新获取。
+							${svc.kind === 'kimi'
+								? 'Kimi Membership 通过 kimi-auth Cookie（JWT 令牌）登录，作 Bearer 认证。该凭证为会话级，浏览器关闭后可能丢失，需重新登录 kimi.com 获取。'
+								: 'Xiaomi MiMo Token Plan 通过 serviceToken Cookie 登录认证。该凭证为会话级，浏览器关闭后可能丢失，需重新登录 platform.xiaomimimo.com 获取。'
+							}
 						</div>
 						<div style="margin-top: 8px; display: flex; align-items: center; gap: 6px;">
 							<input type="checkbox" id="${svc.kind}-auto-refresh-${svc.id}" ${config.settings[svc.kind + 'AutoRefresh'] ? 'checked' : ''}>
@@ -470,18 +470,12 @@ function handleTabSwitch(e) {
 	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
 	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === `panel-${tab}`));
 
-	if (tab === 'settings') {
-		renderSettings();
+	// 切换到「服务」或「设置」面板时按需渲染
+	if (tab === 'services') {
+		renderSettingsServices();
+	} else if (tab === 'global') {
+		renderSettingsGlobal();
 	}
-}
-
-function handleSubTabSwitch(e) {
-	const subtab = e.target.dataset.subtab;
-	if (!subtab) return;
-
-	currentSubTab = subtab;
-	subTabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.subtab === subtab));
-	subTabPanels.forEach(panel => panel.classList.toggle('active', panel.id === `subpanel-${subtab}`));
 }
 
 function handleGlmMainTabClick(e) {
@@ -684,13 +678,13 @@ servicesEl.addEventListener('click', (e) => {
 });
 
 tabBtns.forEach(btn => btn.addEventListener('click', handleTabSwitch));
-subTabBtns.forEach(btn => btn.addEventListener('click', handleSubTabSwitch));
 refreshBtn.addEventListener('click', () => loadAll(true));
 settingsBtn.addEventListener('click', () => {
-	currentTab = 'settings';
-	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'settings'));
-	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === 'panel-settings'));
-	renderSettings();
+	// 设置按钮跳转到「服务」标签页（管理服务配置）
+	currentTab = 'services';
+	tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === 'services'));
+	tabPanels.forEach(panel => panel.classList.toggle('active', panel.id === 'panel-services'));
+	renderSettingsServices();
 });
 
 /** 调度下一次自动刷新 */

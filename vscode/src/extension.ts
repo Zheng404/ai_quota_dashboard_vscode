@@ -118,11 +118,14 @@ async function fetchSingleService(
 	bar: StatusBar,
 ): Promise<boolean> {
 	const key = await config.getKey(profile.id);
-	if (!key) { return false; }
+	// Cookie Bridge 服务的 fetch 仅读本地状态（不调用远程 API），不需要凭证，
+	// 允许 key 为空时继续，确保刚添加的 Bridge 服务能立即显示状态卡片。
+	if (!key && profile.kind !== 'bridge') { return false; }
 
 	try {
 		const provider = resolveProvider(profile.kind);
-		const data = await provider.fetch(key, profile.endpoint);
+		// 非 Bridge 服务此处 key 必非空（上方已校验）；Bridge 服务 fetch 不读取该参数
+		const data = await provider.fetch(key as string, profile.endpoint);
 		data.id = profile.id;
 		data.name = profile.displayName;
 
@@ -222,6 +225,9 @@ async function afterConfigChange(bar: StatusBar, ctx: vscode.ExtensionContext, m
 		await updateView();
 		// 刷新数据（直接调用内部逻辑，避免嵌套队列死锁）
 		await doPullAll(bar, ctx);
+		// 服务列表变化后，按需启动/停止 Bridge 服务器
+		// （用户添加 Cookie Bridge 服务后启动，移除后停止）
+		await syncBridgeLifecycle(bar, ctx);
 		if (msg) {
 			vscode.window.showInformationMessage(msg);
 		}
@@ -533,98 +539,112 @@ async function deduplicateAiProfiles(profiles: ServiceProfile[]): Promise<Servic
 	return config.loadProfiles().filter(p => !removeIds.has(p.id));
 }
 
-async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
-	setBridgeExtensionContext(ctx);
+/**
+ * 处理浏览器扩展推送的凭证：更新 Bridge 状态、分发到对应 AI 服务、刷新视图。
+ * 抽成模块级函数，供 ensureBridgeRunning 注册为 CookieBridgeServer 回调。
+ */
+function handleCookiePayload(payload: CookiePayload, bar: StatusBar, ctx: vscode.ExtensionContext) {
+	bridgeQueue.enqueue(async () => {
+		log(`[Bridge] 收到凭证推送 (cookies=${payload.cookies?.length ?? 0}, kimi=${!!payload.kimiAuthToken}, mimo=${!!payload.mimoCookie}, glm=${!!payload.glmApiKey})`);
 
-	bridge = new CookieBridgeServer((payload: CookiePayload) => {
-		bridgeQueue.enqueue(async () => {
-			log(`[Bridge] 收到凭证推送 (cookies=${payload.cookies?.length ?? 0}, kimi=${!!payload.kimiAuthToken}, mimo=${!!payload.mimoCookie}, glm=${!!payload.glmApiKey})`);
+		// 收集已接收的凭证种类
+		const receivedCredentials: string[] = [];
+		if (payload.kimiAuthToken) { receivedCredentials.push('kimi'); }
+		if (payload.mimoCookie) { receivedCredentials.push('mimo'); }
+		if (payload.glmApiKey) { receivedCredentials.push('glm'); }
 
-			// 收集已接收的凭证种类
-			const receivedCredentials: string[] = [];
-			if (payload.kimiAuthToken) { receivedCredentials.push('kimi'); }
-			if (payload.mimoCookie) { receivedCredentials.push('mimo'); }
-			if (payload.glmApiKey) { receivedCredentials.push('glm'); }
-
-			// 更新 Bridge 服务状态
-			await updateBridgeState({
-				lastPushAt: payload.timestamp,
-				receivedCredentials,
-				connected: true,
-				lastError: undefined,
-			});
-
-			// 分发凭证到对应的 AI 服务（自动写入 Secret Storage 并标记 dataSource='bridge'）
-			// 如果对应的 AI 服务不存在，自动创建
-			let profiles = config.loadProfiles();
-			// 先去重：同一 kind 的 AI 服务只保留一个，避免 Bridge 多次推送后产生重复服务
-			profiles = await deduplicateAiProfiles(profiles);
-			// 同步移除：浏览器扩展已删除的服务，在 VSCode 端也删除
-			profiles = await syncRemoveBridgeServices(profiles, payload.activeKinds ?? []);
-
-			const credentialMap: Array<{ kind: string; value: string | undefined }> = [
-				{ kind: 'kimi', value: payload.kimiAuthToken },
-				{ kind: 'mimo', value: payload.mimoCookie },
-				{ kind: 'glm', value: payload.glmApiKey },
-			];
-			let distributed = false;
-			for (const { kind, value } of credentialMap) {
-				if (!value) { continue; }
-				// 每次循环重新加载，确保看到最新状态
-				profiles = config.loadProfiles();
-				const existing = profiles.find(x => x.kind === kind);
-				if (existing) {
-					// 已有对应服务，更新凭证
-					await config.updateServiceKey(existing.id, value);
-					await config.updateServiceDataSource(existing.id, 'bridge');
-					log(`[Bridge] 凭证已分发到 ${existing.displayName} (${kind})`);
-				} else {
-					// 自动创建对应 AI 服务；创建前双重检查，防止并发/队列间隙产生重复
-					try {
-						const doubleCheck = config.loadProfiles().find(x => x.kind === kind);
-						if (doubleCheck) {
-							await config.updateServiceKey(doubleCheck.id, value);
-							await config.updateServiceDataSource(doubleCheck.id, 'bridge');
-							log(`[Bridge] 凭证已分发到 ${doubleCheck.displayName} (${kind})`);
-						} else {
-							const descriptor = getDescriptor(kind);
-							const displayName = descriptor?.displayName ?? kind;
-							const newId = await config.addService(kind, displayName);
-							await config.updateServiceKey(newId, value);
-							await config.updateServiceDataSource(newId, 'bridge');
-							log(`[Bridge] 自动创建 ${displayName} 服务并分发凭证 (${kind})`);
-						}
-					} catch (e) {
-						logError(`[Bridge] 自动创建 ${kind} 服务失败`, e);
-					}
-				}
-				distributed = true;
-			}
-
-			// 更新 Bridge 服务自身视图
-			profiles = config.loadProfiles();
-			const bridgeProfile = profiles.find(p => p.kind === 'bridge');
-			if (bridgeProfile) {
-				await config.updateServiceKey(bridgeProfile.id, 'connected');
-			}
-
-			// 清除缓存并刷新所有服务（Bridge 推送的新凭证需要生效）
-			if (distributed || bridgeProfile) {
-				cache.clear();
-				// 服务列表可能已变化，清空旧 serviceData 并立即更新视图，避免残留/缺失卡片
-				serviceData.clear();
-				bar.clear();
-				await updateView();
-				try {
-					await pullAll(bar, ctx);
-				} catch (err) {
-					logError('[Bridge] pullAll 刷新失败，已更新视图', err);
-					// 即使拉取失败，也确保视图与当前 profiles 保持一致
-					await updateView();
-				}
-			}
+		// 更新 Bridge 服务状态
+		await updateBridgeState({
+			lastPushAt: payload.timestamp,
+			receivedCredentials,
+			connected: true,
+			lastError: undefined,
 		});
-	}, outputChannel);
+
+		// 分发凭证到对应的 AI 服务（自动写入 Secret Storage 并标记 dataSource='bridge'）
+		// 如果对应的 AI 服务不存在，自动创建
+		let profiles = config.loadProfiles();
+		// 先去重：同一 kind 的 AI 服务只保留一个，避免 Bridge 多次推送后产生重复服务
+		profiles = await deduplicateAiProfiles(profiles);
+		// 同步移除：浏览器扩展已删除的服务，在 VSCode 端也删除
+		profiles = await syncRemoveBridgeServices(profiles, payload.activeKinds ?? []);
+
+		const credentialMap: Array<{ kind: string; value: string | undefined }> = [
+			{ kind: 'kimi', value: payload.kimiAuthToken },
+			{ kind: 'mimo', value: payload.mimoCookie },
+			{ kind: 'glm', value: payload.glmApiKey },
+		];
+		let distributed = false;
+		for (const { kind, value } of credentialMap) {
+			if (!value) { continue; }
+			// 每次循环重新加载，确保看到最新状态
+			profiles = config.loadProfiles();
+			const existing = profiles.find(x => x.kind === kind);
+			if (existing) {
+				// 已有对应服务，更新凭证
+				await config.updateServiceKey(existing.id, value);
+				await config.updateServiceDataSource(existing.id, 'bridge');
+				log(`[Bridge] 凭证已分发到 ${existing.displayName} (${kind})`);
+			} else {
+				// 自动创建对应 AI 服务；创建前双重检查，防止并发/队列间隙产生重复
+				try {
+					const doubleCheck = config.loadProfiles().find(x => x.kind === kind);
+					if (doubleCheck) {
+						await config.updateServiceKey(doubleCheck.id, value);
+						await config.updateServiceDataSource(doubleCheck.id, 'bridge');
+						log(`[Bridge] 凭证已分发到 ${doubleCheck.displayName} (${kind})`);
+					} else {
+						const descriptor = getDescriptor(kind);
+						const displayName = descriptor?.displayName ?? kind;
+						const newId = await config.addService(kind, displayName);
+						await config.updateServiceKey(newId, value);
+						await config.updateServiceDataSource(newId, 'bridge');
+						log(`[Bridge] 自动创建 ${displayName} 服务并分发凭证 (${kind})`);
+					}
+				} catch (e) {
+					logError(`[Bridge] 自动创建 ${kind} 服务失败`, e);
+				}
+			}
+			distributed = true;
+		}
+
+		// 更新 Bridge 服务自身视图
+		profiles = config.loadProfiles();
+		const bridgeProfile = profiles.find(p => p.kind === 'bridge');
+		if (bridgeProfile) {
+			await config.updateServiceKey(bridgeProfile.id, 'connected');
+		}
+
+		// 清除缓存并刷新所有服务（Bridge 推送的新凭证需要生效）
+		if (distributed || bridgeProfile) {
+			cache.clear();
+			// 服务列表可能已变化，清空旧 serviceData 并立即更新视图，避免残留/缺失卡片
+			serviceData.clear();
+			bar.clear();
+			await updateView();
+			try {
+				await pullAll(bar, ctx);
+			} catch (err) {
+				logError('[Bridge] pullAll 刷新失败，已更新视图', err);
+				// 即使拉取失败，也确保视图与当前 profiles 保持一致
+				await updateView();
+			}
+		}
+	});
+}
+
+/**
+ * 若 Cookie Bridge 服务已添加但服务器未运行，则启动服务器。
+ * 服务器仅在用户添加了 kind='bridge' 的服务后才会监听，符合"添加后才启用"语义。
+ * 已运行则直接返回（幂等）。
+ */
+async function ensureBridgeRunning(bar: StatusBar, ctx: vscode.ExtensionContext) {
+	if (bridge) { return; }
+
+	bridge = new CookieBridgeServer(
+		(payload: CookiePayload) => handleCookiePayload(payload, bar, ctx),
+		outputChannel,
+	);
 
 	try {
 		const port = await bridge.start(37100);
@@ -637,9 +657,42 @@ async function setupBridge(ctx: vscode.ExtensionContext, bar: StatusBar) {
 	ctx.subscriptions.push(bridge);
 }
 
+/**
+ * 若当前不存在 kind='bridge' 的服务，则停止 Bridge 服务器（若有）。
+ * 用户移除 Cookie Bridge 服务后，服务器随之关闭，不再监听端口、不再接收推送。
+ */
+async function stopBridgeIfIdle(ctx: vscode.ExtensionContext) {
+	const hasBridge = config.loadProfiles().some(p => p.kind === 'bridge');
+	if (hasBridge) { return; }
+	if (!bridge) { return; }
+
+	await bridge.dispose();
+	// 从 subscriptions 中移除已 dispose 的引用，避免 deactivate 时重复关闭
+	const idx = ctx.subscriptions.indexOf(bridge);
+	if (idx >= 0) { ctx.subscriptions.splice(idx, 1); }
+	bridge = undefined;
+	await updateBridgeState({ connected: false });
+	log('Cookie Bridge 已停止（用户未添加 Cookie Bridge 服务）');
+}
+
+/**
+ * 根据当前服务列表同步 Bridge 服务器生命周期：有 bridge 服务则启动，无则停止。
+ * 在 add/remove/save 命令后通过 afterConfigChange 调用。
+ */
+async function syncBridgeLifecycle(bar: StatusBar, ctx: vscode.ExtensionContext) {
+	if (config.loadProfiles().some(p => p.kind === 'bridge')) {
+		await ensureBridgeRunning(bar, ctx);
+	} else {
+		await stopBridgeIfIdle(ctx);
+	}
+}
+
 export async function activate(ctx: vscode.ExtensionContext) {
 	try {
 		log('activate');
+
+		// Bridge 状态模块需要 ExtensionContext，无论是否启用 Bridge 都要注入
+		setBridgeExtensionContext(ctx);
 
 	config.setContext(ctx);
 	await config.initDefaults();
@@ -677,8 +730,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
 		registerNavigationCommands(ctx);
 		setupActivityListeners(ctx);
 
-		// Cookie Bridge（浏览器扩展伴侣）
-		await setupBridge(ctx, bar);
+		// Cookie Bridge：仅在用户已添加 Cookie Bridge 服务时启动
+		// 用户通过设置页添加/移除该服务后，afterConfigChange 会同步生命周期
+		await syncBridgeLifecycle(bar, ctx);
 
 		// 同步初始活动时间，避免启动时误判 AFK
 		afkDetector.updateActivity();

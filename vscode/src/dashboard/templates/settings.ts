@@ -23,7 +23,7 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 
 	// ====== 设置页渲染器 ======
 
-	function renderServiceItem(p, keys) {
+	function renderServiceItem(p, keys, bridgeState) {
 		const meta = getServiceSettings(p.kind);
 		const placeholder = meta ? meta.keyPlaceholder : 'API Key';
 		const key = keys[p.id] || '';
@@ -44,8 +44,35 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 		// 认证方式：Bridge 服务 / AI 服务（Bridge 推送 / 手动输入）
 		let authHtml = '';
 		if (isBridgeService) {
-			const hasKey = key.length > 0;
-			authHtml = '<div class="svc-row-datasource"><label class="form-label">认证方式</label><div class="form-hint">Cookie Bridge 自动获取</div></div><div class="svc-bridge-status"><span class="bridge-badge ' + (hasKey ? 'connected' : 'disconnected') + '">' + (hasKey ? '已通过浏览器扩展获取' : '等待浏览器扩展推送凭证...') + '</span></div>';
+			// Cookie Bridge 服务条目：整合展示连接状态、最后同步时间、已连接服务标签
+			const st = bridgeState || {};
+			const connected = st.connected === true;
+			const credLabels = { kimi: 'Kimi', mimo: 'MiMo', glm: 'GLM' };
+			const creds = st.receivedCredentials || [];
+			const lastSync = st.lastPushAt
+				? fmtDateTime(new Date(st.lastPushAt))
+				: '暂无';
+			let credsHtml;
+			if (creds.length === 0) {
+				credsHtml = '<span class="bridge-cred-empty">浏览器扩展尚未推送任何凭证</span>';
+			} else {
+				credsHtml = '<div class="bridge-cred-list">' +
+					creds.map(function(c) {
+						return '<span class="bridge-cred-tag">' + escapeHtml(credLabels[c] || c) + '</span>';
+					}).join('') +
+					'</div>';
+			}
+			const errHtml = st.lastError
+				? '<div class="bridge-error-row"><span class="bridge-error-label">诊断：</span><span class="bridge-error-value">' + escapeHtml(st.lastError) + '</span></div>'
+				: '';
+			authHtml = '<div class="svc-row-datasource"><label class="form-label">认证方式</label><div class="form-hint">Cookie Bridge 自动获取</div></div>' +
+				'<div class="svc-bridge-status">' +
+					'<span class="bridge-badge ' + (connected ? 'connected' : 'disconnected') + '">' + (connected ? '已连接浏览器扩展' : '未连接浏览器扩展') + '</span>' +
+					'<div class="bridge-info-row" style="margin-top: 8px;"><span class="bridge-info-label">最后同步：</span><span class="bridge-info-value">' + escapeHtml(lastSync) + '</span></div>' +
+					'<div class="bridge-info-row"><span class="bridge-info-label">已连接服务：</span></div>' +
+					credsHtml +
+					errHtml +
+				'</div>';
 		} else if (isBridgePushed) {
 			authHtml = '<div class="svc-row-datasource"><label class="form-label">认证方式</label><div class="form-hint">Cookie Bridge 自动推送</div></div><div class="svc-bridge-status"><span class="bridge-badge connected">已通过浏览器扩展获取</span> <button type="button" class="btn btn-link svc-switch-manual-btn">切换为手动输入</button></div>';
 		} else {
@@ -55,10 +82,13 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 		return '<div class="service-item" data-id="' + escapeHtml(p.id) + '" data-datasource="' + escapeHtml(p.dataSource || 'manual') + '"><div class="svc-row-kind"><span class="svc-kind-label" data-kind="' + escapeHtml(p.kind) + '">' + escapeHtml(kindLabel) + '</span></div><div class="svc-row-name"><input type="text" class="form-input svc-name" value="' + escapeHtml(p.displayName) + '" placeholder="显示名称"></div>' + authHtml + '<div class="svc-row-actions"><button type="button" class="btn btn-sm btn-delete remove-service-btn">移除服务</button><button type="button" class="btn btn-sm btn-primary save-service-btn">保存配置</button></div></div>';
 	}
 
-	function renderServiceListSettings(settings) {
-		const profiles = settings.profiles;
+	function renderServiceListSettings(settings, bridgeState) {
+		// 隐藏由 Cookie Bridge 隐式创建/管理的 AI 服务（dataSource='bridge' 且非 bridge 服务本身），
+		// 避免用户误删/误改其凭证；这些服务仍会在仪表盘显示配额卡片，并由 Bridge 自动管理。
+		// 手动添加的服务（含手动添加的 Cookie Bridge、手动输入的 AI 服务）均保留显示。
+		const profiles = settings.profiles.filter(p => !(p.dataSource === 'bridge' && p.kind !== 'bridge'));
 		const keys = settings.keys;
-		const items = profiles.map(p => renderServiceItem(p, keys)).join('');
+		const items = profiles.map(p => renderServiceItem(p, keys, bridgeState)).join('');
 		const options = serviceSettingsMap.map(s =>
 			'<option value="' + escapeHtml(s.kind) + '">' + escapeHtml(s.displayName) + '</option>'
 		).join('');
@@ -162,6 +192,7 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 	}
 
 	// ====== Tab 切换 ======
+	// 三个顶级 tab：仪表盘 / 服务 / 设置，通过 data-tab 切换对应 panel
 
 	document.querySelectorAll('.tab-btn').forEach(btn => {
 		btn.addEventListener('click', () => {
@@ -169,15 +200,6 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 			document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
 			btn.classList.add('active');
 			document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-		});
-	});
-
-	document.querySelectorAll('.sub-tab-btn').forEach(btn => {
-		btn.addEventListener('click', () => {
-			document.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
-			document.querySelectorAll('.sub-tab-panel').forEach(p => p.classList.remove('active'));
-			btn.classList.add('active');
-			document.getElementById('subpanel-' + btn.dataset.subtab).classList.add('active');
 		});
 	});
 
@@ -200,12 +222,9 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 		const message = event.data;
 
 		if (message.command === 'switchToSettings') {
-			const settingsTab = document.querySelector('.tab-btn[data-tab="settings"]');
-			if (settingsTab) settingsTab.click();
-			if (message.subtab) {
-				const subTab = document.querySelector('.sub-tab-btn[data-subtab="' + message.subtab + '"]');
-				if (subTab) subTab.click();
-			}
+			// tab 已扁平化：subtab 取值为 'services' / 'global'，直接对应顶级 tab
+			const targetTab = document.querySelector('.tab-btn[data-tab="' + (message.subtab || 'services') + '"]');
+			if (targetTab) targetTab.click();
 			return;
 		}
 
@@ -224,6 +243,7 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 
 			// 基于 profiles 渲染卡片框架，保证服务列表变化即时反映；
 			// 用 services 填充实际数据，未拉取到数据的服务显示 loading/错误占位。
+			// Cookie Bridge 卡片不在仪表盘显示，其状态展示在「服务」标签页顶部。
 			const profiles = (settings.profiles || []).filter(p => p.kind !== 'bridge');
 			const servicesMap = new Map();
 			(services || []).forEach(s => servicesMap.set(s.id, s));
@@ -253,14 +273,29 @@ export function getSettingsScript(descriptors: ServiceDescriptor[]): string {
 			});
 		}
 
-		const servicesPanel = document.getElementById('subpanel-services');
+		const servicesPanel = document.getElementById('panel-services');
 		if (servicesPanel) {
-			servicesPanel.innerHTML = renderServiceListSettings(settings);
+			// 提取 Bridge 状态数据（连接状态、最后同步、已连接服务），传给服务列表
+			// 用于在 Cookie Bridge 服务条目内整合展示，而非独立卡片。
+			let bridgeState = null;
+			const bridgeProfile = (settings.profiles || []).find(p => p.kind === 'bridge');
+			if (bridgeProfile) {
+				const servicesMap = new Map();
+				(services || []).forEach(s => servicesMap.set(s.id, s));
+				const bd = servicesMap.get(bridgeProfile.id);
+				bridgeState = bd ? {
+					connected: bd.connected,
+					lastPushAt: bd.lastPushAt,
+					receivedCredentials: bd.receivedCredentials || [],
+					lastError: bd.lastError,
+				} : { connected: false, receivedCredentials: [] };
+			}
+			servicesPanel.innerHTML = renderServiceListSettings(settings, bridgeState);
 			bindServiceEvents();
 			bindAddService();
 		}
 
-		const globalPanel = document.getElementById('subpanel-global');
+		const globalPanel = document.getElementById('panel-global');
 		if (globalPanel) {
 			globalPanel.innerHTML = renderGlobalSettings(settings);
 			bindGlobalEvents();
