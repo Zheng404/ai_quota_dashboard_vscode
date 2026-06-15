@@ -59,7 +59,7 @@ src/
 │   │   ├── template.ts
 │   │   ├── styles.ts
 │   │   └── settings.ts
-│   └── mimo/                 # MiMo 服务包（结构同 GLM/Kimi）
+│   └── mimo/                 # MiMo 服务包（结构同 GLM/Kimi，但无 constants.ts）
 │       ├── index.ts
 │       ├── provider.ts
 │       ├── statusBar.ts
@@ -531,6 +531,7 @@ npm run test:watch   # 监听模式运行测试
 | `src/services/glm/provider.test.ts` | GLM 数据解析逻辑 |
 | `src/services/kimi/provider.test.ts` | Kimi 数据解析逻辑（窗口限制、主配额、余额） |
 | `src/services/mimo/provider.test.ts` | MiMo 数据解析逻辑 |
+| `src/services/bridge/provider.test.ts` | Bridge 状态数据提供者 |
 | `src/storage/persistence.test.ts` | 历史数据加载、保存、合并、清理 |
 | `src/ui/statusBarRenderer.test.ts` | 倒计时格式化、颜色计算 |
 

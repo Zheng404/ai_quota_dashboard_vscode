@@ -4,6 +4,7 @@
   "description": "Monitor AI Coding Plan quota usage (GLM, Kimi, MiMo, etc.)",
   "version": "1.0.0",
   "publisher": "Zheng404",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/Zheng404/ai_quota_dashboard_vscode"
