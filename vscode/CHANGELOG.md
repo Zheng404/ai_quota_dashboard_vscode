@@ -2,7 +2,7 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.0.0]
 
 ### 新增 (Added)
 
@@ -13,32 +13,6 @@
 - **Cookie Bridge 状态整合进「服务」标签页**
   - Bridge 连接徽章、最后同步时间、已连接服务标签（Kimi/MiMo/GLM）、诊断信息整合进「服务」标签页的 Bridge 服务条目
   - 仪表盘不再单独显示 Bridge 卡片（`filter(p => p.kind !== 'bridge')`）
-
-### 变更 (Changed)
-
-- **Cookie Bridge 按需启停**
-  - Bridge 服务器从"扩展激活即无条件启动"改为"仅当用户添加 Cookie Bridge 服务后才启动"
-  - 新增 `syncBridgeLifecycle` / `ensureBridgeRunning` / `stopBridgeIfIdle` 管理生命周期；用户移除 Bridge 服务后自动关闭端口
-- **tab 结构扁平化（VSCode + 浏览器扩展）**
-  - 从两级 tab（仪表盘/设置，设置下含服务列表+全局设置子标签）改为三个平级标签：仪表盘 / 服务 / 设置
-- **卡片服务名改用官方名称**
-  - GLM Coding Plan (CN) / Kimi Membership / Xiaomi MiMo Token Plan（原为中文翻译）
-- **Kimi / MiMo 凭证文案按认证机制区分**（浏览器扩展）
-  - Kimi：`kimi-auth` Cookie（JWT 令牌）作 Bearer 认证
-  - MiMo：`serviceToken` Cookie 认证
-
-### 修复 (Fixed)
-
-- **刷新按钮 CSS**：`.btn-refresh-svc.spinning .icon` 选择器找不到元素（SVG 无 `.icon` class），刷新图标实际不旋转；改为 `.spinning svg`
-- **浏览器扩展 Kimi / MiMo 卡片边框缺失**：`.kimi-card` / `.mimo-card` 缺少样式定义（仅 `.glm-card` 有），补全后三个卡片视觉统一
-- **浏览器扩展刷新按钮文字旋转**：`<span class="spin">刷新</span>` 导致文字跟随旋转；文字移出 spin span，新增加载圆环指示器
-- **dashboard.js 致命 bug**：DOM 引用替换时遗留重复 `const` 声明导致 SyntaxError，独立仪表盘页面完全瘫痪；同时修复既有 id 不匹配 bug（`getElementById('settings-services')` vs HTML 的 `subpanel-services`）
-- **dashboard.js 服务过滤一致性**：`s.enabled` → `s.enabled !== false`，与 popup.js 对齐，避免缺少 `enabled` 字段时漏显服务
-
-## [1.0.0] - 2026-06-14
-
-### 新增 (Added)
-
 - **独立的 Cookie Bridge 服务卡片**
   - VSCode 扩展新增 `kind='bridge'` 服务，作为独立的状态监控卡片
   - 显示浏览器扩展连接状态、最后同步时间、已接收凭证种类（Kimi/MiMo/GLM）
@@ -55,8 +29,18 @@
   - `activate()` 增加顶层 try-catch，激活失败时显示错误通知并记录日志
   - Bridge 服务器启动失败时更新 Bridge 状态并记录诊断信息
 
-### 重构 (Changed)
+### 变更 (Changed)
 
+- **Cookie Bridge 按需启停**
+  - Bridge 服务器从"扩展激活即无条件启动"改为"仅当用户添加 Cookie Bridge 服务后才启动"
+  - 新增 `syncBridgeLifecycle` / `ensureBridgeRunning` / `stopBridgeIfIdle` 管理生命周期；用户移除 Bridge 服务后自动关闭端口
+- **tab 结构扁平化（VSCode + 浏览器扩展）**
+  - 从两级 tab（仪表盘/设置，设置下含服务列表+全局设置子标签）改为三个平级标签：仪表盘 / 服务 / 设置
+- **卡片服务名改用官方名称**
+  - GLM Coding Plan (CN) / Kimi Membership / Xiaomi MiMo Token Plan（原为中文翻译）
+- **Kimi / MiMo 凭证文案按认证机制区分**（浏览器扩展）
+  - Kimi：`kimi-auth` Cookie（JWT 令牌）作 Bearer 认证
+  - MiMo：`serviceToken` Cookie 认证
 - **浏览器扩展统一凭证推送**
   - `background.js` 不再依赖 `activeKinds` 选择性转发凭证
   - 总是采集并推送全部凭证：`kimiAuthToken` + `mimoCookie` + `glmApiKey`
@@ -77,14 +61,42 @@
 - **MiMo 错误提示优化**
   - 401 和业务级未登录统一提示"MiMo 登录凭证已过期，请重新登录 MiMo 网站"
   - VSCode 端和浏览器扩展端提示文案保持一致
+- **资源生命周期管理**
+  - `outputChannel` 和 `afkDetector` 纳入 `ctx.subscriptions`，由 VSCode 统一释放；`deactivate` 不再手动 dispose `outputChannel`
+- **状态栏分隔符判断可读性**
+  - `q.dividerBefore ?? i > 0` 加括号 `(i > 0)` 消除 `??` 与 `>` 优先级歧义
+
+### 安全 (Security)
+
+- **Cookie Bridge `/health` 端点探测密钥校验**（⚠️ 破坏性变更）
+  - `/health` 端点原先无条件返回 `authToken`，任何能访问 `127.0.0.1:37100-37110` 的本地进程均可获取 token 伪造凭证推送
+  - 改为校验打包进扩展的探测密钥（`X-Bridge-Probe` 头），通过后才返回会话 authToken
+  - **兼容性**：要求浏览器扩展与 VSCode 扩展同步更新到 1.0.0，旧版浏览器扩展无法连接新版 VSCode
+- **状态栏 tooltip Markdown 注入防护**
+  - 状态栏 tooltip 此前将用户/API 文本（服务名、错误信息、配额标签）直接拼入 MarkdownString（`isTrusted` + `supportHtml`），存在注入风险
+  - 新增 `escapeMarkdown()` 工具函数，对所有动态纯文本做 Markdown 特殊字符转义
 
 ### 修复 (Fixed)
 
+- **刷新按钮 CSS**：`.btn-refresh-svc.spinning .icon` 选择器找不到元素（SVG 无 `.icon` class），刷新图标实际不旋转；改为 `.spinning svg`
+- **浏览器扩展 Kimi / MiMo 卡片边框缺失**：`.kimi-card` / `.mimo-card` 缺少样式定义（仅 `.glm-card` 有），补全后三个卡片视觉统一
+- **浏览器扩展刷新按钮文字旋转**：`<span class="spin">刷新</span>` 导致文字跟随旋转；文字移出 spin span，新增加载圆环指示器
+- **dashboard.js 致命 bug**：DOM 引用替换时遗留重复 `const` 声明导致 SyntaxError，独立仪表盘页面完全瘫痪；同时修复既有 id 不匹配 bug（`getElementById('settings-services')` vs HTML 的 `subpanel-services`）
+- **dashboard.js 服务过滤一致性**：`s.enabled` → `s.enabled !== false`，与 popup.js 对齐，避免缺少 `enabled` 字段时漏显服务
 - **VSCode `/cookies` 端点 GLM 推送问题**
   - 修复了仅当 `cookies` 数组非空时才触发回调的问题
   - 现在只要有 `cookies` / `kimiAuthToken` / `mimoCookie` / `glmApiKey` 任意凭证即触发 Bridge 状态更新和分发
 - **旧数据 `dataSource` 兼容**
   - `initDefaults()` 后调用 `migrateBridgeDataSource()`，将缺失 `dataSource` 的旧 profile 默认设为 `manual`
+- **Bridge 服务器启动失败后无法自愈**：`ensureBridgeRunning` 此前在 `start()` 前就把实例赋值给模块级变量，端口全被占用时后续重试永远命中「已运行」直接返回；改为成功后才赋值并 push subscriptions，失败时 dispose 候选实例，允许下次重试
+- **Cookie Bridge 去重误删用户手动配置的服务**：`deduplicateAiProfiles` 此前同一 kind 存在 manual + bridge 时会删除 manual 服务（连同 Secret Storage 凭证），用户手动输入的 API Key 被静默清空；改为 manual 服务永远不参与去重，仅清理重复的 bridge 服务
+- **GLM 详情懒加载数据被全局刷新覆盖**：用户点了「近7天/近30天」后，若触发一次全局自动刷新，`modelUsageByRange` 被 `{ day }` 整体覆盖，已加载的 week/month 数据丢失，Tab 切回时又变回「数据加载中」；新增 `mergeDetailRanges` 在刷新时保留旧的非 day 范围数据
+- **浏览器扩展连续 401 清空整个重传队列**：VSCode 重启生成新 token 时，扩展持有的旧 token 连续 401 会触发 `pendingPayloads.length = 0`，丢弃队列中尚未推送的有效凭证；移除整队清空逻辑，由单包 `retries>=3` 机制负责丢弃
+- **浏览器扩展配置变更双重推送**：popup 保存配置时 `storage.onChanged` 监听和 `configUpdated` 消息都会触发 `relayCookies`，产生冗余的两次 HTTP POST；`configUpdated` 消息不再重复 relayCookies，仅兜底 discoverPort
+- **GLM 配额百分比未校验导致 NaN 传播**：`parseLimits` 此前直接透传 API 的 `percentage`/`nextResetTime`，未做有限性校验和 clamp；新增 `clampPercent()`（规范化为 [0,100]）和 `sanitizeTimestamp()`（过滤非法时间戳），`checkQuotaWarnings()` 同步过滤非有限值
+- **`requestDetailRange` range 未做白名单校验**：任意字符串会作为 key 污染 `modelUsageByRange` 状态对象；增加 `['day','week','month']` 白名单
+- **`escapeHtml` 未转义单引号**：VSCode 端和浏览器扩展端的 `escapeHtml` 补充 `'` → `&#39;` 转义
+- **GLM Token 用量格式不统一**：`fmtTokens`（带空格 + 2 位小数）与全局 `fmtNum`（无空格 + 1 位小数）格式不一致，同一卡片内单位显示混乱；`fmtTokens` 改为直接复用 `fmtNum`
 
 ## [0.9.0] - 2026-06-10
 
@@ -299,6 +311,7 @@
 - Webview JS 为字符串拼接，无类型检查
 - `warnThreshold` 配置声明但未实际触发警告通知
 
+[1.0.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/compare/v0.9.0...HEAD
 [0.9.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.9.0
 [0.3.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.3.0
 [0.2.5]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.2.5

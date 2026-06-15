@@ -23,7 +23,9 @@
 浏览器扩展与 VSCode 之间的凭证同步采用以下安全措施。Kimi/MiMo 的 Cookie 和 GLM API Key 都会通过 Bridge 转发至 VSCode，并由 VSCode 自动分发到对应的 AI 服务（Bridge 服务器仅在用户添加了 Cookie Bridge 服务后启动，详见按需启停）：
 
 1. **本地仅限**：HTTP 服务器绑定 `127.0.0.1`，拒绝任何外部网络连接
-2. **动态 Token 认证**：每次 VSCode 启动生成随机 `authToken`（32 字节随机十六进制串），浏览器扩展通过 `/health` 端点获取，推送数据时必须携带 `X-Auth-Token` 头
+2. **双层 Token 认证**：
+   - **探测密钥**（`BRIDGE_PROBE_SECRET`）：打包进扩展的固定密钥，浏览器扩展访问 `/health` 时必须在 `X-Bridge-Probe` 头携带此密钥，通过后才返回会话 authToken。本地其它进程不知道此密钥，无法获取 token 伪造推送
+   - **会话 authToken**：每次 VSCode 启动生成随机 `authToken`（32 字节随机十六进制串），浏览器扩展通过 `/health` 获取，推送数据时必须携带 `X-Auth-Token` 头
 3. **CORS 收紧**：仅放行 `chrome-extension://` 和 `moz-extension://` 来源
 4. **敏感字段过滤**：推送前自动移除 `httpOnly`、`secure`、`expirationDate` 等浏览器元数据，仅发送必要的 `name` 和 `value`
 5. **请求大小限制**：POST 请求体限制 1MB，防止 DoS 攻击
@@ -40,25 +42,25 @@
   - 该文件仅用于**本地进程管理**，浏览器扩展不读取它（Chrome 扩展无法直接访问文件系统）
 - **浏览器扩展的端口发现**：通过**探测本地 HTTP 端点**实现
   - 优先尝试上次成功的端口（保存在 `chrome.storage.local` 的 `bridgeLastPort`）
-  - 失败后遍历 `[37100..37110]`，对每个端口发起 `GET /health`（2 秒超时）
-  - `/health` 响应中包含当前 `authToken`，供后续推送认证使用
+  - 失败后遍历 `[37100..37110]`，对每个端口发起 `GET /health`（携带 `X-Bridge-Probe` 探测密钥，2 秒超时）
+  - `/health` 校验探测密钥通过后返回当前 `authToken`，供后续推送认证使用；密钥不匹配则返回 401
 
 ## 已知限制
 
-### `/health` 端点暴露 authToken
+### Cookie Bridge 认证机制说明
 
-Cookie Bridge 的 `/health` 端点会返回当前 `authToken`，这是**预期内的本地设计**：
+Cookie Bridge 采用**双层 Token 认证**保护 `/health` 和 `/cookies` 端点：
 
-- **影响范围**：仅本地可访问（`127.0.0.1`）
-- **用途**：浏览器扩展发现端口并获取认证 Token
-- **风险**：本地其他进程可能读取此 Token，但无法通过网络利用
-- **缓解**：`authToken` 每次 VSCode 重启重新生成，生命周期仅限于当前会话；且即便被读取，也只能向本机推送凭证，无法借此窃取已存储的凭证
+- **第一层（探测密钥）**：`/health` 端点要求请求头携带打包进扩展的 `BRIDGE_PROBE_SECRET`，本地其它进程不知道此密钥，无法获取会话 authToken
+- **第二层（会话 authToken）**：`/cookies` 端点要求请求头携带 `X-Auth-Token`，值为 VSCode 启动时随机生成的 32 字节 token
+- **兼容性**：探测密钥打包在扩展中，理论上可被逆向提取。它是纵深防御的第一层门槛，真正的会话级认证仍依赖随机生成的 authToken（每次 VSCode 重启重新生成，生命周期仅限当前会话）
 
-### Webview XSS 防护
+### Webview / 状态栏 XSS 防护
 
 - 浏览器扩展的 Dashboard 和 Popup 页面已全面使用 `createElement`/`textContent` 替代 `innerHTML`
 - 所有 HTML 页面均配置了 Content Security Policy (CSP)
-- VSCode Webview 仪表盘的服务数据渲染仍使用内联 HTML 字符串拼接，但输入数据来自受信任的本地 API 响应
+- VSCode Webview 仪表盘的服务数据渲染使用内联 HTML 字符串拼接，但所有用户/API 文本均经过 `escapeHtml()` 转义（含单引号）
+- 状态栏 tooltip（`MarkdownString`，`isTrusted` + `supportHtml`）对所有动态纯文本（服务名、错误信息、配额标签）经过 `escapeMarkdown()` 转义，防止 Markdown 结构破坏或 HTML 注入
 
 ## 报告安全问题
 

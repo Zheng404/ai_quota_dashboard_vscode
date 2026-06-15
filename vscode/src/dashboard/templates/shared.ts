@@ -18,7 +18,7 @@ export function getSharedScript(): string {
 	}
 
 	function escapeHtml(text) {
-		return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+		return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 	}
 
 	// ====== 共享渲染器 ======

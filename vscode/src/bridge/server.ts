@@ -11,6 +11,14 @@ import { randomBytes } from 'crypto';
 /** 最大请求体大小 (1MB) */
 const MAX_BODY_SIZE = 1024 * 1024;
 
+/**
+ * /health 端点的探测密钥（与浏览器扩展 constants.js 中的 BRIDGE_PROBE_SECRET 对齐）。
+ * 浏览器扩展访问 /health 时必须在 X-Bridge-Probe 头携带此密钥，才会返回会话 authToken。
+ * 本地其它进程不知道此密钥，无法获取 authToken 来伪造凭证推送。
+ * 这是纵深防御的第一层门槛；真正的会话级认证仍依赖随机生成的 authToken。
+ */
+const BRIDGE_PROBE_SECRET = 'aqd-bridge-probe-7f3c9e1a4b2d';
+
 /** 生成带进程 PID 的端口文件路径，避免多实例冲突 */
 function getPortFilePath(): string {
 	return path.join(os.tmpdir(), `.ai-quota-bridge-port-${process.pid}`);
@@ -141,10 +149,17 @@ export class CookieBridgeServer {
 			return;
 		}
 
-	// 健康检查（无需认证）
-	// 始终返回 authToken：本地 127.0.0.1 服务器，Chrome MV3 Service Worker fetch
-	// 可能不携带 Origin header，导致 isBrowserExtension 判断失败
+	// 健康检查（需校验探测密钥，不泄露给本地任意进程）
+	// Chrome MV3 Service Worker fetch 可能不携带 Origin header，故不依赖 CORS 判断身份，
+	// 改为校验打包进扩展的探测密钥（X-Bridge-Probe），通过后才返回会话 authToken。
 	if (req.url === '/health' && req.method === 'GET') {
+		const probe = req.headers['x-bridge-probe'];
+		if (probe !== BRIDGE_PROBE_SECRET) {
+			this.log(`/health 探测密钥校验失败: origin=${req.headers.origin ?? '(none)'}`);
+			res.writeHead(401, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Unauthorized' }));
+			return;
+		}
 		res.writeHead(200, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ status: 'ok', port: this.port, authToken: this.authToken }));
 		return;

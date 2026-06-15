@@ -78,6 +78,7 @@ ai_quota_dashboard_vscode/
 ├── browser-common/             # 浏览器扩展共享代码（Chrome/Firefox 共用）
 │   ├── browser-api.js          # 浏览器 API 兼容层
 │   ├── cache.js / config.js    # 缓存与配置管理
+│   ├── constants.js            # 共享常量（BRIDGE_PROBE_SECRET 探测密钥）
 │   ├── popup.html / popup.js   # Popup 仪表盘
 │   ├── dashboard.html / dashboard.js # 独立 Dashboard 页面
 │   ├── templates.js            # 卡片模板
@@ -209,7 +210,7 @@ pullAll() 定时触发
 
 > **无缝刷新**：`refreshingIds: Set<string>` 标记正在刷新的服务，随 `updateData` 推送给前端。刷新时保留旧数据，对应服务卡片刷新按钮旋转（`.spinning svg`）；首次加载/新增服务时显示轻量加载骨架卡（`renderLoadingCard`）。仪表盘采用三个平级 tab：仪表盘 / 服务 / 设置。
 
-> **Bridge 按需启停**：Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**（`syncBridgeLifecycle` → `ensureBridgeRunning`），移除后自动关闭（`stopBridgeIfIdle`）。浏览器扩展推送凭证后，VSCode 的 `handleCookiePayload()`（`extension.ts`）会**自动分发**到对应的 AI 服务（GLM/Kimi/MiMo）：写入 Secret Storage 并标记 `dataSource='bridge'`，若对应服务不存在则**自动创建**，并对同一 kind 去重（优先保留 bridge 来源）。用户也可在 VSCode 服务标签页把某个服务从 `bridge` 切换为 `manual` 手动输入。Bridge 状态（连接徽章、最后同步、已连接服务标签）整合在「服务」标签页的 Bridge 服务条目内，不在仪表盘单独显示卡片。
+> **Bridge 按需启停**：Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**（`syncBridgeLifecycle` → `ensureBridgeRunning`），移除后自动关闭（`stopBridgeIfIdle`）。浏览器扩展推送凭证后，VSCode 的 `handleCookiePayload()`（`extension.ts`）会**自动分发**到对应的 AI 服务（GLM/Kimi/MiMo）：写入 Secret Storage 并标记 `dataSource='bridge'`，若对应服务不存在则**自动创建**，并对同一 kind 去重（`deduplicateAiProfiles` 仅清理重复的 bridge 服务，**manual 服务永远不参与去重**）。用户也可在 VSCode 服务标签页把某个服务从 `bridge` 切换为 `manual` 手动输入。Bridge 状态（连接徽章、最后同步、已连接服务标签）整合在「服务」标签页的 Bridge 服务条目内，不在仪表盘单独显示卡片。
 
 **注册服务**：在 `src/services/registry.ts` 中导入并注册：
 
@@ -447,7 +448,7 @@ const _defaultRegistry = createRegistry([
 - `ServiceProfile` 的 `dataSource` 字段决定凭证来源：`'manual'`（用户手动输入）或 `'bridge'`（浏览器扩展推送）
 - 新增 AI 服务时默认 `dataSource='manual'`；浏览器扩展推送凭证后，`handleCookiePayload` 会自动将其改为 `'bridge'` 并写入 Secret Storage
 - Bridge 服务（`kind='bridge'`）固定 `dataSource='bridge'`，仅用于展示浏览器扩展连接状态
-- 同一 kind 的 AI 服务会被去重（`deduplicateAiProfiles`），优先保留 bridge 来源，避免重复卡片
+- 同一 kind 的 bridge 服务会被去重（`deduplicateAiProfiles` 仅清理重复的 bridge 服务，manual 服务不参与去重），避免重复卡片
 
 ### 配置存储与 Bridge 状态持久化
 
@@ -536,11 +537,11 @@ VSCode 扩展的配置与状态持久化位置如下：
 
 **核心行为**：
 
-1. **全量推送 + VSCode 自动分发**：总是推送 Kimi、MiMo、GLM 三类凭证。VSCode 的 `handleCookiePayload` 收到后自动分发到对应 AI 服务（写入 Secret Storage + `dataSource='bridge'`），不存在则自动创建。同一 kind 去重，优先保留 bridge 来源。
+1. **全量推送 + VSCode 自动分发**：总是推送 Kimi、MiMo、GLM 三类凭证。VSCode 的 `handleCookiePayload` 收到后自动分发到对应 AI 服务（写入 Secret Storage + `dataSource='bridge'`），不存在则自动创建。同一 kind 仅清理重复的 bridge 服务（manual 服务不参与去重）。
 2. **监听所有目标 Cookie**：`chrome.cookies.onChanged` 监听所有目标域名（`kimi.com`、`xiaomimimo.com`）的目标 Cookie 变化，不受服务启用状态限制。
 3. **凭证变化即时通知**：Cookie 变化时经防抖推送给 VSCode，并广播 `cookieChanged` 消息给所有已打开的 Popup/Dashboard 页面触发单服务刷新。
 4. **定时凭证检测**：通过 `chrome.alarms` 每 30 分钟执行一次凭证存在性、过期时间和 API 探测检查，发现失效时尝试自动刷新（Offscreen API 双层策略 / 最小化弹出窗口降级）。
-5. **端口发现**：启动时遍历 fallback 端口 `[37100..37110]`，对每个端口 `GET /health` 探测，连接成功后获取 `authToken` 并维持推送通道。优先尝试上次成功的端口。
+5. **端口发现**：启动时遍历 fallback 端口 `[37100..37110]`，对每个端口 `GET /health`（请求头携带打包进扩展的 `X-Bridge-Probe` 探测密钥）探测，密钥校验通过后获取 `authToken` 并维持推送通道。优先尝试上次成功的端口。
 
 > **GLM API Key 说明**：GLM 凭证不是浏览器登录态，而是用户在浏览器扩展 Popup 设置中手动填入、保存在 `chrome.storage.local` 的 API Key，由 `gatherAllStorageCredentials()` 采集后一并推送。
 

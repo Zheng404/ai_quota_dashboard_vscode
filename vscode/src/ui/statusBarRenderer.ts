@@ -3,6 +3,17 @@ import { ServiceData, getColorLevel, ColorLevel } from '../core/types';
 
 // ==================== 共享工具函数 ====================
 
+/**
+ * 转义 Markdown 特殊字符，防止用户/API 文本破坏 Markdown 结构或注入 HTML。
+ * 用于插入 MarkdownString（isTrusted + supportHtml）的动态纯文本。
+ */
+export function escapeMarkdown(text: string): string {
+	// 优先处理反斜杠，避免二次转义
+	return String(text)
+		.replace(/\\/g, '\\\\')
+		.replace(/([`*_{}\[\]()#+\-.!|<>~])/g, '\\$1');
+}
+
 export function compactCountdown(ts?: number): string {
 	if (!ts) return '';
 	const diff = ts - Date.now();

@@ -150,7 +150,7 @@ syncBridgeLifecycle() 按需启停：
 浏览器扩展 → POST /cookies → CookieBridgeServer → handleCookiePayload()
     │
     ├─ 更新 Bridge 服务状态（连接状态、最后同步时间、已接收凭证种类）
-    ├─ deduplicateAiProfiles() 同 kind 去重（优先保留 dataSource='bridge'）
+    ├─ deduplicateAiProfiles() 仅清理重复的 bridge 服务（manual 服务永远不参与去重，保护用户手动输入的凭证）
     ├─ syncRemoveBridgeServices() 按浏览器 activeKinds 同步移除已废弃服务
     ├─ 分发凭证到 AI 服务（Kimi/MiMo/GLM → Secret Storage + dataSource='bridge'）
     ├─ 标记 Bridge profile 为已连接
@@ -354,7 +354,7 @@ Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**，而非
 | 函数 | 职责 |
 |------|------|
 | `syncBridgeLifecycle(bar, ctx)` | 入口：有 `kind='bridge'` profile 则 `ensureBridgeRunning`，否则 `stopBridgeIfIdle`。在 `activate()` 和每次 `afterConfigChange()` 后调用 |
-| `ensureBridgeRunning(bar, ctx)` | 幂等：若服务器已运行直接返回；否则新建 `CookieBridgeServer`、`start(37100)`、注册回调 `handleCookiePayload` |
+| `ensureBridgeRunning(bar, ctx)` | 幂等：若服务器已运行直接返回；否则新建 `CookieBridgeServer`、`start(37100)`、**成功后才**赋值给模块级 `bridge` 并 push subscriptions、注册回调 `handleCookiePayload`。失败时 dispose 候选实例，允许下次重试 |
 | `stopBridgeIfIdle(ctx)` | 若当前无 Bridge profile，则 `bridge.dispose()`、从 subscriptions 移除、置 `bridge = undefined` |
 
 ---
@@ -705,6 +705,7 @@ browser-common/                # 共享代码（单一可信源）
 ├── browser-api.js             # 浏览器 API 兼容层（预留）
 ├── cache.js                   # 基于 storage.local 的带 TTL 缓存（正常 60s / 错误 300s）
 ├── config.js                  # 集中式配置管理（loadConfig/saveConfig）
+├── constants.js               # 共享常量（BRIDGE_PROBE_SECRET 探测密钥）
 ├── offscreen.html             # Offscreen 文档：双层凭证刷新（fetch → iframe 回退）
 ├── popup.html                 # Popup 仪表盘 HTML
 ├── popup.js                   # Popup 主逻辑（仪表盘 + 设置 + 服务管理）
@@ -750,6 +751,7 @@ firefox/                        # Firefox 专属文件
 | 浏览器 API 兼容层 | `browser-api.js` | 统一 `chrome.*` / `browser.*` API 差异（当前为预留层） |
 | 缓存 | `cache.js` | 基于 `chrome.storage.local` 的带 TTL 缓存（正常 60s / 错误 300s） |
 | 配置管理 | `config.js` | 集中式 `loadConfig()` / `saveConfig()` |
+| 共享常量 | `constants.js` | `BRIDGE_PROBE_SECRET` 探测密钥（访问 `/health` 的第一层门槛） |
 | Popup 主逻辑 | `popup.js` | 仪表盘弹窗 + 设置管理，导入 config.js 和 cache.js |
 | 卡片模板 | `templates.js` | GLM / Kimi / MiMo 配额卡片和 SVG 图表模板 |
 | 样式表 | `styles.css` | Popup 和卡片样式 |
@@ -784,7 +786,7 @@ VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现
 
 1. **端口范围**：预定义 fallback 端口列表 `[37100..37110]`，顺序尝试直到找到可用端口绑定 `127.0.0.1`
 2. **PID 端口文件**：VSCode 端写入 `os.tmpdir()/.ai-quota-bridge-port-{pid}`（权限 0600），仅用于本地进程管理、避免多 VSCode 实例冲突
-3. **浏览器扩展发现**：Chrome 扩展无法读文件系统，改用**探测 `/health` 端点**——优先尝试上次成功的端口（`storage.local` 的 `bridgeLastPort`），失败后遍历 `[37100..37110]` 逐个 `GET /health`，成功即从响应获取 `authToken`
+3. **浏览器扩展发现**：Chrome 扩展无法读文件系统，改用**探测 `/health` 端点**——优先尝试上次成功的端口（`storage.local` 的 `bridgeLastPort`），失败后遍历 `[37100..37110]` 逐个 `GET /health`（请求头携带打包进扩展的 `X-Bridge-Probe` 探测密钥），密钥校验通过后从响应获取 `authToken`
 
 ### 凭证失效检测 + 自动刷新
 

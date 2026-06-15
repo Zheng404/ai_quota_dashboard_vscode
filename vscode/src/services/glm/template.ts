@@ -290,11 +290,9 @@ export function getGlmTemplate(): string {
 		return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 	}
 
+	// Token 用量格式化（与全局 fmtNum 保持一致，避免同一卡片内格式不统一）
 	function fmtTokens(n) {
-		if (n == null) return '-';
-		if (n >= 1e6) return (n / 1e6).toFixed(2) + ' M';
-		if (n >= 1e3) return (n / 1e3).toFixed(2) + ' K';
-		return String(n);
+		return fmtNum(n);
 	}
 
 	// ====== Tab 切换处理 ======

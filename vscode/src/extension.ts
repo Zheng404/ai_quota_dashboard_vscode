@@ -11,6 +11,7 @@ import { resolveProvider, isValidServiceId, getDescriptor, getAllDescriptors } f
 import { CookieBridgeServer } from './bridge/server';
 import type { CookiePayload } from './bridge/server';
 import { setBridgeExtensionContext, updateBridgeState } from './services/bridge/state';
+import type { GlmServiceData } from './services/glm/types';
 
 let timer: NodeJS.Timeout | undefined;
 
@@ -38,8 +39,10 @@ function checkQuotaWarnings(): void {
 	const warnings: string[] = [];
 	for (const [, data] of serviceData) {
 		if (data.err || data.slots.length === 0) { continue; }
-		// 前置条件：slots.length > 0，Math.max 参数非空
-		const maxPercent = Math.max(...data.slots.map(s => s.percent));
+		// 过滤非有限值的 percent，避免 NaN 污染 Math.max 导致预警失效
+		const validPercents = data.slots.map(s => s.percent).filter(p => Number.isFinite(p));
+		if (validPercents.length === 0) { continue; }
+		const maxPercent = Math.max(...validPercents);
 		if (maxPercent >= threshold * 100) {
 			warnings.push(`${data.name}: ${maxPercent.toFixed(0)}% 已使用`);
 		}
@@ -114,6 +117,22 @@ async function updateView() {
 	dashboardViewProvider.update(serviceData, await getCurrentSettings(), Array.from(refreshingIds));
 }
 
+/**
+ * 合并详情范围数据：把旧数据中已懒加载的 week/month（等非 day 范围）合并到新数据，
+ * 避免全局刷新（只重新拉取 day）覆盖掉用户已懒加载的其它范围详情。
+ * 仅对 GLM 服务（含 modelUsageByRange / toolUsageByRange）生效。
+ */
+function mergeDetailRanges(target: ServiceData, source: ServiceData): void {
+	const t = target as GlmServiceData;
+	const s = source as GlmServiceData;
+	if (t.modelUsageByRange && s.modelUsageByRange) {
+		t.modelUsageByRange = { ...s.modelUsageByRange, ...t.modelUsageByRange };
+	}
+	if (t.toolUsageByRange && s.toolUsageByRange) {
+		t.toolUsageByRange = { ...s.toolUsageByRange, ...t.toolUsageByRange };
+	}
+}
+
 // 拉取单个服务（核心逻辑，被 pullService 和 pullAll 复用）
 async function fetchSingleService(
 	profile: ServiceProfile,
@@ -131,6 +150,14 @@ async function fetchSingleService(
 		const data = await provider.fetch(key as string, profile.endpoint);
 		data.id = profile.id;
 		data.name = profile.displayName;
+
+		// GLM 详情懒加载保护：全局刷新只会重新拉取 day 范围数据，
+		// 若直接覆盖 modelUsageByRange/toolUsageByRange，会丢失用户已懒加载的 week/month 详情。
+		// 此处把旧数据中已缓存的其它范围合并回新数据（day 由新数据覆盖）。
+		const oldData = serviceData.get(profile.id);
+		if (oldData) {
+			mergeDetailRanges(data, oldData);
+		}
 
 		const withHistory = attachHistory(data, historyMap);
 		bar.feed(withHistory);
@@ -307,7 +334,11 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			if (!data || typeof data !== 'object') { return; }
 			const d = data as { serviceId?: string; range?: string };
 			const serviceId = typeof d.serviceId === 'string' ? d.serviceId : '';
-			const range = typeof d.range === 'string' ? d.range : 'day';
+			// range 白名单校验，避免任意字符串污染 modelUsageByRange 状态对象
+			const VALID_DETAIL_RANGES = ['day', 'week', 'month'] as const;
+			const range = VALID_DETAIL_RANGES.includes(d.range as typeof VALID_DETAIL_RANGES[number])
+				? (d.range as typeof VALID_DETAIL_RANGES[number])
+				: 'day';
 			if (!serviceId) { return; }
 
 			const profiles = config.loadProfiles();
@@ -530,7 +561,8 @@ const BRIDGE_AI_KINDS = new Set(['glm', 'kimi', 'mimo']);
 
 /**
  * 对 AI 服务 profiles 按 kind 去重。
- * 如果同一 kind 存在多个服务，保留 dataSource='bridge' 的优先；否则保留第一个。
+ * 仅清理同一 kind 下重复的 bridge 服务（扩展多次推送可能产生重复）。
+ * manual 服务（用户手动输入凭证）永远不参与去重，避免静默删除用户数据。
  * 返回去重后的 profiles，并删除被移除服务的 Secret Storage 凭证。
  */
 async function deduplicateAiProfiles(profiles: ServiceProfile[]): Promise<ServiceProfile[]> {
@@ -539,15 +571,13 @@ async function deduplicateAiProfiles(profiles: ServiceProfile[]): Promise<Servic
 
 	for (const p of profiles) {
 		if (!BRIDGE_AI_KINDS.has(p.kind)) { continue; }
+		// manual 服务永远不参与去重（保护用户手动输入的凭证不丢失）
+		if (p.dataSource !== 'bridge') { continue; }
+
 		const existing = keepers.get(p.kind);
 		if (existing) {
-			// 保留 bridge 数据源；如果都不是 bridge，保留已存在的（先来者）
-			if (p.dataSource === 'bridge' && existing.dataSource !== 'bridge') {
-				toRemove.push(existing);
-				keepers.set(p.kind, p);
-			} else {
-				toRemove.push(p);
-			}
+			// 同 kind 已有一个 bridge 服务，当前是重复的 bridge，删除
+			toRemove.push(p);
 		} else {
 			keepers.set(p.kind, p);
 		}
@@ -560,7 +590,7 @@ async function deduplicateAiProfiles(profiles: ServiceProfile[]): Promise<Servic
 	const removeIds = new Set(toRemove.map(p => p.id));
 	for (const p of toRemove) {
 		await config.removeService(p.id);
-		log(`[Bridge] 移除重复的 ${p.kind} 服务: ${p.displayName} (${p.id})`);
+		log(`[Bridge] 移除重复的 bridge 服务: ${p.displayName} (${p.id})`);
 	}
 
 	return config.loadProfiles().filter(p => !removeIds.has(p.id));
@@ -672,20 +702,24 @@ function handleCookiePayload(payload: CookiePayload, bar: StatusBar, ctx: vscode
 async function ensureBridgeRunning(bar: StatusBar, ctx: vscode.ExtensionContext) {
 	if (bridge) { return; }
 
-	bridge = new CookieBridgeServer(
+	// 先用局部变量持有，启动成功后才赋值给模块级 bridge，
+	// 避免 start() 失败后 bridge 指向未监听的实例，导致后续 ensureBridgeRunning 永远命中 `if (bridge) return` 无法自愈
+	const candidate = new CookieBridgeServer(
 		(payload: CookiePayload) => handleCookiePayload(payload, bar, ctx),
 		outputChannel,
 	);
 
 	try {
-		const port = await bridge.start(37100);
+		const port = await candidate.start(37100);
+		bridge = candidate;
+		ctx.subscriptions.push(bridge);
 		log(`Cookie Bridge 已启动，监听端口: ${port}`);
 	} catch (err) {
 		logError('Cookie Bridge 启动失败', err);
+		// 失败时清理候选实例（释放可能已占用的资源），不赋值给 bridge，下次可重试
+		await candidate.dispose().catch(() => { /* ignore */ });
 		await updateBridgeState({ connected: false, lastError: `启动失败: ${err instanceof Error ? err.message : String(err)}` });
 	}
-
-	ctx.subscriptions.push(bridge);
 }
 
 /**
@@ -721,6 +755,11 @@ async function syncBridgeLifecycle(bar: StatusBar, ctx: vscode.ExtensionContext)
 export async function activate(ctx: vscode.ExtensionContext) {
 	try {
 		log('activate');
+
+		// 将 outputChannel 和 afkDetector 纳入 ctx.subscriptions，
+		// 由 VSCode 统一管理生命周期（避免模块顶层创建的资源在 deactivate 未被调用时泄漏）
+		ctx.subscriptions.push(outputChannel);
+		ctx.subscriptions.push(afkDetector);
 
 		// Bridge 状态模块需要 ExtensionContext，无论是否启用 Bridge 都要注入
 		setBridgeExtensionContext(ctx);
@@ -784,5 +823,5 @@ export async function deactivate(): Promise<void> {
 	}
 	cache.dispose();
 	await bridge?.dispose();
-	outputChannel.dispose();
+	// outputChannel 和 afkDetector 已纳入 ctx.subscriptions，由 VSCode 统一释放
 }

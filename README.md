@@ -326,7 +326,8 @@ Browser Extension                        VSCode Extension
       │     127.0.0.1:[37100..37110] 之一       │
       │◀───────────────────────────────────────┤
       │                                        │
-      │  2. GET /health (发现端口 + 获取 token)  │
+      │  2. GET /health (携带探测密钥,            │
+      │     发现端口 + 获取会话 token)            │
       │◀───────────────────────────────────────┤
       │                                        │
       │  3. 浏览器扩展监控目标站点 Cookie        │
@@ -377,11 +378,14 @@ Browser Extension                        VSCode Extension
 
 **安全机制**：
 - HTTP 服务器仅绑定 `127.0.0.1`，拒绝外部网络连接
-- 动态 Token 认证（每次 VSCode 启动生成随机 `authToken`，通过 `/health` 返回；`POST /cookies` 必须携带 `X-Auth-Token`）
+- 双层 Token 认证：
+  - **探测密钥**（`BRIDGE_PROBE_SECRET`）：打包进扩展的固定密钥，`GET /health` 必须携带 `X-Bridge-Probe` 头，校验通过才返回会话 authToken。本地其它进程不知道此密钥，无法获取 token 伪造推送
+  - **会话 authToken**：每次 VSCode 启动生成随机 `authToken`，`POST /cookies` 必须携带 `X-Auth-Token`
 - CORS 仅放行 `chrome-extension://` / `moz-extension://` 来源
 - Cookie 推送时过滤敏感字段（`httpOnly` / `secure` / `expirationDate`），仅发送 `name` 和 `value`
 - 请求体大小限制（≤ 1MB），防止 DoS；POST 请求 5 秒超时
 - 浏览器扩展全部页面使用 `createElement`/`textContent` 替代 `innerHTML`，并配置 CSP
+- VSCode 端 Webview 仪表盘和状态栏 tooltip 对所有动态文本做 `escapeHtml`/`escapeMarkdown` 转义
 
 ### 浏览器扩展核心组件
 
@@ -390,6 +394,7 @@ Browser Extension                        VSCode Extension
 | 浏览器 API 兼容层 | `browser-common/browser-api.js` | 统一 Chrome/Firefox API 差异 |
 | 缓存模块 | `browser-common/cache.js` | storage.local 带 TTL 缓存（正常 60s / 错误 300s） |
 | 配置管理 | `browser-common/config.js` | 集中式配置读写 |
+| 共享常量 | `browser-common/constants.js` | `BRIDGE_PROBE_SECRET` 探测密钥（访问 `/health` 的第一层门槛） |
 | Service Worker | `browser-common/scripts/background.js` | 端口发现、Cookie 监控、凭证失效检测、自动刷新（Offscreen/窗口降级）、防抖推送、与 VSCode 通信 |
 | Popup | `browser-common/popup.html` + `popup.js` | 仪表盘弹窗，显示配额卡片、详情 Tab、设置管理 |
 | 卡片模板 | `browser-common/templates.js` | GLM / Kimi / MiMo 配额卡片和 SVG 图表模板 |
@@ -626,7 +631,7 @@ build/
 
 ### Q: 为什么同一个 AI 服务类型只能有一个卡片？
 
-**A**: 这是 Cookie Bridge 的**去重机制**（`deduplicateAiProfiles`）。当浏览器扩展推送凭证时，VSCode 会确保同一服务类型（kind）只保留一个实例，优先保留 `dataSource='bridge'` 的，避免多次推送后产生重复卡片。如需多个独立账号，可把某个实例切换为手动模式。
+**A**: 这是 Cookie Bridge 的**去重机制**（`deduplicateAiProfiles`）。当浏览器扩展多次推送凭证时，VSCode 会清理同一服务类型（kind）下重复的 **bridge** 服务，避免产生重复卡片。**用户手动配置的服务（manual）永远不参与去重**，不会被自动删除。因此你可以同时保留一个 bridge 来源的服务和一个手动输入的服务。
 
 ### Q: Cookie Bridge 推送凭证会泄露给不需要的服务吗？
 

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ServiceData } from '../core/types';
 import { fmtNum } from '../core/format';
 import { getDescriptor } from '../services/registry';
-import { fullCountdown, svcColor, StatusBarRenderer } from './statusBarRenderer';
+import { fullCountdown, svcColor, escapeMarkdown, StatusBarRenderer } from './statusBarRenderer';
 
 /** 状态栏 - 每个服务一个 StatusBarItem，独立着色 */
 export class StatusBar {
@@ -188,8 +188,8 @@ export class StatusBar {
 		md.supportHtml = true;
 
 		if (d.err) {
-			md.appendMarkdown(`### ${d.name}（异常）\n\n`);
-			md.appendMarkdown(`${d.err}\n\n`);
+			md.appendMarkdown(`### ${escapeMarkdown(d.name)}（异常）\n\n`);
+			md.appendMarkdown(`${escapeMarkdown(d.err)}\n\n`);
 			md.appendMarkdown(`---\n\n`);
 			md.appendMarkdown(`[刷新](command:aiQuotaDashboard.refreshService?${encodeURIComponent(JSON.stringify({ id: d.id }))})`);
 			md.appendMarkdown(` | `);
@@ -199,8 +199,8 @@ export class StatusBar {
 
 		const renderer = this.resolveRenderer(d.kind);
 		if (!renderer) {
-			md.appendMarkdown(`### ${d.name}（警告）\n\n`);
-			md.appendMarkdown(`服务类型 \`${d.kind}\` 未注册状态栏渲染器，请在 ServiceDescriptor 中配置 statusBarRenderer。\n\n`);
+			md.appendMarkdown(`### ${escapeMarkdown(d.name)}（警告）\n\n`);
+			md.appendMarkdown(`服务类型 \`${escapeMarkdown(d.kind)}\` 未注册状态栏渲染器，请在 ServiceDescriptor 中配置 statusBarRenderer。\n\n`);
 			md.appendMarkdown(`[设置](command:aiQuotaDashboard.openSettings)`);
 			return md;
 		}
@@ -209,17 +209,17 @@ export class StatusBar {
 		const quotas = renderer.buildTooltipQuotas(d);
 
 		// 标题
-		const levelBadge = meta.levelBadge ? ` [${meta.levelBadge}]` : '';
-		md.appendMarkdown(`### ${d.name}${levelBadge}\n\n`);
-		md.appendMarkdown(`${meta.serviceDisplayName}\n\n`);
+		const levelBadge = meta.levelBadge ? ` [${escapeMarkdown(meta.levelBadge)}]` : '';
+		md.appendMarkdown(`### ${escapeMarkdown(d.name)}${levelBadge}\n\n`);
+		md.appendMarkdown(`${escapeMarkdown(meta.serviceDisplayName)}\n\n`);
 
 		if (meta.membershipExpiry) {
-			md.appendMarkdown(`${meta.membershipExpiry}\n\n`);
+			md.appendMarkdown(`${escapeMarkdown(meta.membershipExpiry)}\n\n`);
 		}
 
 		if (meta.extraLines) {
 			for (const line of meta.extraLines) {
-				md.appendMarkdown(`${line}\n\n`);
+				md.appendMarkdown(`${escapeMarkdown(line)}\n\n`);
 			}
 		}
 
@@ -229,12 +229,12 @@ export class StatusBar {
 		// 配额区域
 		for (let i = 0; i < quotas.length; i++) {
 			const q = quotas[i];
-			if (q.dividerBefore ?? i > 0) {
+			if (q.dividerBefore ?? (i > 0)) {
 				md.appendMarkdown(`---\n\n`);
 			}
 
 			const pct = q.percent.toFixed(0);
-			md.appendMarkdown(`**${q.label}** **${pct}%** 已使用\n\n`);
+			md.appendMarkdown(`**${escapeMarkdown(q.label)}** **${pct}%** 已使用\n\n`);
 
 		const filled = Number.isFinite(q.percent) ? Math.max(0, Math.min(20, Math.round((q.percent / 100) * 20))) : 0;
 		const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);

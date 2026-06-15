@@ -6,6 +6,10 @@
  * 凭证失效检测 + 后台自动刷新。
  */
 
+// /health 端点探测密钥（与 VSCode 端 server.ts 的 BRIDGE_PROBE_SECRET 对齐）
+// 本地其它进程不知道此密钥，无法获取 authToken 来伪造推送
+const BRIDGE_PROBE_SECRET = 'aqd-bridge-probe-7f3c9e1a4b2d';
+
 // ===== Cookie / 凭证目标配置（全量定义，按需启用）=====
 
 const COOKIE_TARGETS = {
@@ -406,6 +410,7 @@ async function _doDiscoverPort() {
   for (const port of portsToTry) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        headers: { 'X-Bridge-Probe': BRIDGE_PROBE_SECRET },
         signal: timeoutSignal(2000), // 增加超时到 2 秒
       });
       if (res.ok) {
@@ -496,13 +501,9 @@ async function sendToVscode(payload) {
         BRIDGE.authFailures++;
         BRIDGE.lastError = `VSCode Bridge 认证失败（第 ${BRIDGE.authFailures} 次）`;
         console.log(`[Bridge] 认证失效（第 ${BRIDGE.authFailures} 次），正在重新发现...`);
-        // 连续认证失败超过 5 次：清空待重传队列，避免无限循环
-        if (BRIDGE.authFailures >= 5) {
-          console.warn('[Bridge] 连续认证失败超过 5 次，清空待重传队列');
-          pendingPayloads.length = 0;
-          await persistPending();
-          BRIDGE.authFailures = 0;
-        }
+        // 不再清空整个待重传队列：旧 token 连续 401 会由 retryPending 的单包 retries>=3 机制丢弃。
+        // 这样 VSCode 重启后扩展持有的旧 token 失效时，不会丢失队列中尚未推送的有效凭证，
+        // 只会在重试耗尽后丢弃单个包。
         return false;
       }
 
@@ -1456,13 +1457,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   // 配置变更通知（popup 保存配置后发送）
+  // 注意：storage.onChanged 监听器已负责更新 activeKinds、调度 alarms 和 relayCookies，
+  // 此处不再重复 relayCookies（避免双重推送），仅兜底确保端口已连接，
+  // storage.onChanged 的 relayCookies 会在端口就绪后实际推送。
   if (msg.action === 'configUpdated') {
     loadActiveKinds().then(async () => {
-      // 配置更新后按当前活跃服务列表推送对应凭证
-      const found = await discoverPort();
-      if (found) {
-        await relayCookies(true);
-      }
+      await discoverPort();
       sendResponse({ success: true });
     });
     return true;

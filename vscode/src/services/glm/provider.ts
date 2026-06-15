@@ -173,6 +173,19 @@ function getTimeUnitLabel(unit: number): string {
 	}
 }
 
+/** 把百分比规范化为 [0,100] 的有限数，NaN/null/undefined 归 0 */
+function clampPercent(value: number | undefined | null): number {
+	const n = typeof value === 'number' ? value : Number(value);
+	if (!Number.isFinite(n)) { return 0; }
+	return Math.max(0, Math.min(100, n));
+}
+
+/** 校验时间戳为合法的有限正数（毫秒），否则返回 undefined */
+function sanitizeTimestamp(value: number | undefined | null): number | undefined {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) { return undefined; }
+	return value;
+}
+
 function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: QuotaSlot[]; level?: string } {
 	const limits = raw.limits ?? [];
 	const slots: QuotaSlot[] = [];
@@ -181,18 +194,18 @@ function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: Quo
 		if (item.type === 'TOKENS_LIMIT') {
 			slots.push({
 				label: getGlmQuotaLabel(item),
-				percent: item.percentage,
+				percent: clampPercent(item.percentage),
 				used: undefined,
 				limit: undefined,
-				resetsAt: item.nextResetTime,
+				resetsAt: sanitizeTimestamp(item.nextResetTime),
 			});
 		} else if (item.type === 'TIME_LIMIT') {
 			slots.push({
 				label: getGlmQuotaLabel(item),
-				percent: item.percentage,
+				percent: clampPercent(item.percentage),
 				used: item.currentValue,
 				limit: item.usage,
-				resetsAt: item.nextResetTime,
+				resetsAt: sanitizeTimestamp(item.nextResetTime),
 			});
 		}
 	}

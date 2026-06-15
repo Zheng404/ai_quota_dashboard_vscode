@@ -41,7 +41,7 @@ cd "$SCRIPT_DIR/chrome"
 zip -r "$BUILD_DIR/ai-quota-dashboard-chrome-v${VERSION}.zip" \
   manifest.json offscreen.html popup.html popup.js dashboard.html dashboard.js \
   styles.css templates.js \
-  config.js cache.js browser-api.js \
+  config.js cache.js browser-api.js constants.js \
   api/ scripts/ icons/ > /dev/null
 echo "   ✓ Chrome: build/ai-quota-dashboard-chrome-v${VERSION}.zip"
 
@@ -51,7 +51,7 @@ cd "$SCRIPT_DIR/firefox"
 zip -r "$BUILD_DIR/ai-quota-dashboard-firefox-v${VERSION}.zip" \
   manifest.json offscreen.html popup.html popup.js dashboard.html dashboard.js \
   styles.css templates.js \
-  config.js cache.js browser-api.js \
+  config.js cache.js browser-api.js constants.js \
   api/ scripts/ icons/ > /dev/null
 echo "   ✓ Firefox: build/ai-quota-dashboard-firefox-v${VERSION}.zip"
 
@@ -61,13 +61,13 @@ echo "🧹 清理构建产物..."
 # 从 chrome/ 移除 browser-common 文件（保留 manifest.json 和 icons/）
 cd "$SCRIPT_DIR/chrome"
 rm -f popup.html popup.js dashboard.html dashboard.js styles.css templates.js
-rm -f config.js cache.js browser-api.js offscreen.html
+rm -f config.js cache.js browser-api.js constants.js offscreen.html
 rm -rf api scripts
 
 # 从 firefox/ 移除 browser-common 文件（保留 manifest.json 和 icons/）
 cd "$SCRIPT_DIR/firefox"
 rm -f popup.html popup.js dashboard.html dashboard.js styles.css templates.js
-rm -f config.js cache.js browser-api.js offscreen.html
+rm -f config.js cache.js browser-api.js constants.js offscreen.html
 rm -rf api scripts
 
 # ---- VSCode 扩展 ----
