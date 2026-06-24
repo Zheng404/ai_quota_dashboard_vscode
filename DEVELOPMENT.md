@@ -691,15 +691,15 @@ export default defineConfig({
 
 # 输出：
 # build/
-# ├── ai-quota-dashboard-chrome-v1.0.0.zip
-# ├── ai-quota-dashboard-firefox-v1.0.0.zip
+# ├── ai-quota-dashboard-chrome-v1.1.0.zip
+# ├── ai-quota-dashboard-firefox-v1.1.0.zip
 # └── ai-quota-dashboard-x.x.x.vsix
 ```
 
 **脚本逻辑**：
 1. 清理 `build/` 目录
 2. 将 `browser-common/*` 复制到 `chrome/` 和 `firefox/`
-3. 分别打 zip 包（`ai-quota-dashboard-chrome-v1.0.0.zip` / `ai-quota-dashboard-firefox-v1.0.0.zip`）
+3. 分别打 zip 包（`ai-quota-dashboard-chrome-v1.1.0.zip` / `ai-quota-dashboard-firefox-v1.1.0.zip`）
 4. 清理阶段：从 `chrome/` 和 `firefox/` 中删除复制进来的文件，仅保留 `manifest.json` 和 `icons/`
 5. 检查 `vsce` 是否安装，如已安装则打包 VSCode 扩展
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Quota Dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI 配额用量仪表盘 — 支持 GLM Coding Plan、Kimi Membership、Xiaomi MiMo 等服务的配额监控与 Cookie Bridge 凭证转发",
   "permissions": [
     "cookies",

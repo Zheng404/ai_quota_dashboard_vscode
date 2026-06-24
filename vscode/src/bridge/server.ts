@@ -43,6 +43,8 @@ export interface CookiePayload {
 	glmApiKey?: string;
 	/** 浏览器扩展当前活跃的服务 kind 列表，用于 VSCode 端同步移除服务 */
 	activeKinds?: string[];
+	/** 浏览器扩展中各 AI 服务的自定义显示名称映射（kind -> displayName） */
+	displayNames?: Record<string, string>;
 }
 
 /** Cookie 接收回调 */

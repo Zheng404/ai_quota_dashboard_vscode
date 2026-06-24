@@ -741,7 +741,7 @@ firefox/                        # Firefox 专属文件
 `build.sh` 采用「复制 → 打包 → 清理」策略：
 
 1. 将 `browser-common/*` 完整复制到 `chrome/` 和 `firefox/`
-2. 分别打 zip 包：`ai-quota-dashboard-chrome-v1.0.0.zip` / `ai-quota-dashboard-firefox-v1.0.0.zip`
+2. 分别打 zip 包：`ai-quota-dashboard-chrome-v1.1.0.zip` / `ai-quota-dashboard-firefox-v1.1.0.zip`
 3. 清理阶段：从 `chrome/` 和 `firefox/` 中删除复制进来的文件，仅保留 `manifest.json` 和 `icons/`
 4. 打包 VSCode 扩展（`vsce package`）
 

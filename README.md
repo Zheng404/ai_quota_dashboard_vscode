@@ -134,7 +134,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 #### Chrome / Edge
 
-1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-chrome-v1.0.0.zip` 并解压
+1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-chrome-v1.1.0.zip` 并解压
 2. 打开 Chrome/Edge，地址栏输入 `chrome://extensions/`
 3. 右上角开启 **开发者模式**
 4. 点击 **加载已解压的扩展程序**
@@ -142,7 +142,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 #### Firefox
 
-1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-firefox-v1.0.0.zip` 并解压
+1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-firefox-v1.1.0.zip` 并解压
 2. 打开 Firefox，地址栏输入 `about:debugging#/runtime/this-firefox`
 3. 点击 **临时载入附加组件**
 4. 选择解压后的 `firefox/manifest.json`
@@ -565,8 +565,8 @@ npm test
 # 输出目录
 build/
 ├── ai-quota-dashboard-*.vsix             # VSCode 扩展
-├── ai-quota-dashboard-chrome-v1.0.0.zip  # Chrome / Edge 浏览器扩展
-└── ai-quota-dashboard-firefox-v1.0.0.zip # Firefox 浏览器扩展
+├── ai-quota-dashboard-chrome-v1.1.0.zip  # Chrome / Edge 浏览器扩展
+└── ai-quota-dashboard-firefox-v1.1.0.zip # Firefox 浏览器扩展
 ```
 
 ---
@@ -665,6 +665,17 @@ build/
 ## 更新日志
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
+
+### [1.1.0] - 2026-06-24
+
+**新增**
+
+- 🏷️ **浏览器扩展支持自定义服务显示名称**：popup / dashboard 设置页可直接编辑服务名，空值自动回退默认标签
+- 🔗 **Cookie Bridge 双向同步显示名称**：浏览器扩展推送凭证时附带 `displayNames`，VSCode 端自动同步/应用该名称
+
+**修复**
+
+- 🐛 dashboard.js 独立页面服务名丢失问题
 
 ### [1.0.0] - 2026-06-15
 

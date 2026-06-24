@@ -2,6 +2,22 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.1.0] - 2026-06-24
+
+### 新增 (Added)
+
+- **浏览器扩展支持自定义服务显示名称**
+  - popup.js / dashboard.js 设置页服务名称从只读 span 改为可编辑 input
+  - 保存时读取输入框值写回 `svc.name` 并持久化，空值回退默认标签
+  - dashboard.js `loadService` 补上 `name` 覆盖，修复独立仪表盘页面服务名丢失的 bug
+- **Cookie Bridge 双向显示名称同步**
+  - 浏览器扩展推送凭证时新增 `displayNames` 字段，携带各 AI 服务的自定义显示名称（kind -> displayName）
+  - VSCode 端收到后，对 bridge 数据源的服务自动更新 `displayName`，并在自动创建服务时优先使用浏览器扩展提供的名称
+
+### 修复 (Fixed)
+
+- **浏览器扩展设置页服务名不可编辑**：之前用户无法修改服务在卡片/设置页中的显示名称，现在可直接在「服务」标签页编辑
+
 ## [1.0.0] - 2026-06-15
 
 ### 新增 (Added)
@@ -311,6 +327,7 @@
 - Webview JS 为字符串拼接，无类型检查
 - `warnThreshold` 配置声明但未实际触发警告通知
 
+[1.1.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.0.0
 [0.9.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.9.0
 [0.3.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.3.0

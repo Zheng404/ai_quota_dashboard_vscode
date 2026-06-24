@@ -37,6 +37,13 @@ const COOKIE_TARGETS = {
   },
 };
 
+// 各 AI 服务的默认显示名称（用于推送 displayNames 给 VSCode 端）
+const SERVICE_LABELS = {
+  glm: 'GLM Coding Plan (CN)',
+  kimi: 'Kimi Membership',
+  mimo: 'Xiaomi MiMo Token Plan',
+};
+
 // ===== Cookie 类凭证本地缓存与后台刷新（MiMo / Kimi 通用）=====
 
 const CREDENTIAL_CACHE_KEYS = {
@@ -233,6 +240,7 @@ async function isMimoAutoRefreshEnabled() { return isAutoRefreshEnabled('mimo');
 // ===== 当前活跃的监控目标（从 dashboardConfig.services 推导）=====
 
 let activeKinds = new Set();
+let activeDisplayNames = {};
 
 /** 从 services 配置推导需要监控的 kind 列表 */
 function deriveActiveKinds(services) {
@@ -244,6 +252,20 @@ function deriveActiveKinds(services) {
     }
   }
   return kinds;
+}
+
+/** 从 services 配置推导各 AI 服务的显示名称映射（kind -> displayName） */
+function deriveDisplayNames(services) {
+  const names = {};
+  if (!Array.isArray(services)) return names;
+  for (const svc of services) {
+    if (svc.enabled !== false && COOKIE_TARGETS[svc.kind]) {
+      names[svc.kind] = (typeof svc.name === 'string' && svc.name.trim())
+        ? svc.name.trim()
+        : (SERVICE_LABELS[svc.kind] || svc.kind);
+    }
+  }
+  return names;
 }
 
 // ===== VSCode Bridge 服务器配置 =====
@@ -815,6 +837,7 @@ async function relayCookies(force = false) {
     mimoCookie: mimoCookieStr,
     glmApiKey: storageCredentials['glmApiKey'] || null,
     activeKinds: [...activeKinds],
+    displayNames: { ...activeDisplayNames },
   };
 
   const statusParts = [];
@@ -853,10 +876,12 @@ async function loadActiveKinds() {
     const stored = await chrome.storage.local.get('dashboardConfig');
     const services = stored.dashboardConfig?.services ?? [];
     activeKinds = deriveActiveKinds(services);
+    activeDisplayNames = deriveDisplayNames(services);
     console.log('[Config] 活跃服务列表:', [...activeKinds]);
   } catch (err) {
     console.error('[Config] 加载配置失败:', err);
     activeKinds = new Set();
+    activeDisplayNames = {};
   }
 }
 
@@ -869,6 +894,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const newConfig = changes.dashboardConfig.newValue;
     const services = newConfig?.services ?? [];
     activeKinds = deriveActiveKinds(services);
+    activeDisplayNames = deriveDisplayNames(services);
     console.log('[Config] 监控目标已更新:', [...activeKinds]);
     // 配置变更后按新的活跃服务列表推送对应凭证
     relayCookies(true);

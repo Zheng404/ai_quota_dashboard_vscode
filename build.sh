@@ -8,7 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 BUILD_DIR="$SCRIPT_DIR/build"
 
 BROWSER_COMMON="$SCRIPT_DIR/browser-common"

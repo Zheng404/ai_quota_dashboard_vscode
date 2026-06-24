@@ -641,6 +641,11 @@ function handleCookiePayload(payload: CookiePayload, bar: StatusBar, ctx: vscode
 				// 已有对应服务，更新凭证
 				await config.updateServiceKey(existing.id, value);
 				await config.updateServiceDataSource(existing.id, 'bridge');
+				// Bridge 推送的显示名称若变化，同步更新（仅对 bridge 数据源的服务生效，保护手动重命名）
+				const bridgeName = payload.displayNames?.[kind];
+				if (existing.dataSource === 'bridge' && typeof bridgeName === 'string' && bridgeName.length > 0 && bridgeName !== existing.displayName) {
+					await config.updateService(existing.id, { displayName: bridgeName });
+				}
 				log(`[Bridge] 凭证已分发到 ${existing.displayName} (${kind})`);
 			} else {
 				// 自动创建对应 AI 服务；创建前双重检查，防止并发/队列间隙产生重复
@@ -649,10 +654,15 @@ function handleCookiePayload(payload: CookiePayload, bar: StatusBar, ctx: vscode
 					if (doubleCheck) {
 						await config.updateServiceKey(doubleCheck.id, value);
 						await config.updateServiceDataSource(doubleCheck.id, 'bridge');
+						// Bridge 推送的显示名称若变化，同步更新
+						const bridgeName = payload.displayNames?.[kind];
+						if (doubleCheck.dataSource === 'bridge' && typeof bridgeName === 'string' && bridgeName.length > 0 && bridgeName !== doubleCheck.displayName) {
+							await config.updateService(doubleCheck.id, { displayName: bridgeName });
+						}
 						log(`[Bridge] 凭证已分发到 ${doubleCheck.displayName} (${kind})`);
 					} else {
 						const descriptor = getDescriptor(kind);
-						const displayName = descriptor?.displayName ?? kind;
+						const displayName = payload.displayNames?.[kind] || descriptor?.displayName || kind;
 						const newId = await config.addService(kind, displayName);
 						await config.updateServiceKey(newId, value);
 						await config.updateServiceDataSource(newId, 'bridge');
