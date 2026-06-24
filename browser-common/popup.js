@@ -347,7 +347,7 @@ function renderSettingsServices() {
 		html += `
 				<div class="service-item-card" data-service-id="${svc.id}">
 					<div class="svc-row">
-						<span class="svc-name">${escapeHtml(svc.name)}</span>
+						<input type="text" class="svc-name-input" data-service-id="${svc.id}" value="${escapeHtml(svc.name)}" placeholder="显示名称">
 						<span class="svc-kind">${escapeHtml(SERVICE_LABELS[svc.kind] || svc.kind)}</span>
 					</div>
 					${isGlm ? `
@@ -517,6 +517,12 @@ async function handleSaveService(e) {
 	const svc = config.services.find(s => s.id === serviceId);
 	if (!svc) return;
 
+	// 读取并保存自定义显示名称
+	const nameInput = card.querySelector('.svc-name-input');
+	if (nameInput) {
+		svc.name = nameInput.value.trim() || SERVICE_LABELS[svc.kind] || svc.kind;
+	}
+
 	if (svc.kind === 'glm') {
 		const keyInput = card.querySelector('.glm-key-input');
 		if (keyInput) {
@@ -531,7 +537,8 @@ async function handleSaveService(e) {
 	btn.textContent = '已保存';
 	setTimeout(() => btn.textContent = '保存配置', 1500);
 
-	if (svc.kind === 'glm' && config.glmApiKey) {
+	// 名称变更后需要刷新缓存（loadService 会用新的 svc.name 覆盖卡片标题）
+	if (svc.kind !== 'glm' || config.glmApiKey) {
 		await refreshSingleService(serviceId);
 	}
 }
