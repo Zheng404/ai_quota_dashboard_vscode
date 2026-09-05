@@ -16,13 +16,9 @@ export const kimiStatusBarRenderer: StatusBarRenderer<KimiServiceData> = {
 		}));
 	},
 
-	buildTooltipMeta(data): TooltipMeta {
+	buildTooltipMeta(_data): TooltipMeta {
 		return {
 			serviceDisplayName: 'Kimi Membership',
-			levelBadge: data.level?.toUpperCase(),
-			membershipExpiry: data.currentEndTime
-				? `会员有效期至: ${data.currentEndTime}`
-				: undefined,
 		};
 	},
 

@@ -49,8 +49,14 @@ function sleep(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** doRequest 的返回结构：result 为解析后的响应体，statusCode 为真实 HTTP 响应状态码 */
+interface DoRequestResult<T> {
+	result: T;
+	statusCode: number | undefined;
+}
+
 /** 底层 HTTP(S) 请求封装（单发，根据 URL scheme 自动选择协议） */
-function doRequest<T>(options: HttpRequestOptions): Promise<T> {
+function doRequest<T>(options: HttpRequestOptions): Promise<DoRequestResult<T>> {
 	return new Promise((resolve, reject) => {
 		const u = new URL(options.url);
 		const isSecure = u.protocol === 'https:';
@@ -74,29 +80,29 @@ function doRequest<T>(options: HttpRequestOptions): Promise<T> {
 					}
 					// Ignore other types to avoid silent data corruption
 				});
-				res.on('end', () => {
-					const body = Buffer.concat(chunks).toString('utf-8');
-					const contentType = res.headers['content-type'] ?? '';
+			res.on('end', () => {
+				const body = Buffer.concat(chunks).toString('utf-8');
+				const contentType = res.headers['content-type'] ?? '';
 
-					if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
-						// 非 JSON 响应直接返回原始文本
-						if (!contentType.includes('application/json')) {
-							resolve(body as unknown as T);
-							return;
-						}
-						try { resolve(JSON.parse(body)); }
-						catch {
-							reject(createHttpError('JSON parse error', res.statusCode, options.url, body.slice(0, 500)));
-						}
-					} else {
-						reject(createHttpError(
-							`HTTP ${res.statusCode}`,
-							res.statusCode ?? undefined,
-							options.url,
-							body.slice(0, 500),
-						));
+				if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
+					// 非 JSON 响应直接返回原始文本
+					if (!contentType.includes('application/json')) {
+						resolve({ result: body as unknown as T, statusCode: res.statusCode });
+						return;
 					}
-				});
+					try { resolve({ result: JSON.parse(body) as T, statusCode: res.statusCode }); }
+					catch {
+						reject(createHttpError('JSON parse error', res.statusCode, options.url, body.slice(0, 500)));
+					}
+				} else {
+					reject(createHttpError(
+						`HTTP ${res.statusCode}`,
+						res.statusCode ?? undefined,
+						options.url,
+						body.slice(0, 500),
+					));
+				}
+			});
 			},
 		);
 		req.on('error', (err) => reject(createHttpError(err.message, undefined, options.url)));
@@ -125,11 +131,11 @@ export async function httpRequest<T>(options: HttpRequestOptions): Promise<T> {
 	let lastError: Error | undefined;
 	for (let attempt = 0; attempt <= retries; attempt++) {
 		try {
-			const result = await doRequest<T>(options);
+			const { result, statusCode } = await doRequest<T>(options);
 			options.onResponseLog?.({
 				method: options.method,
 				url: options.url,
-				statusCode: (result as any)?.statusCode ?? 200,
+				statusCode,
 				durationMs: Date.now() - startTime,
 			});
 			return result;

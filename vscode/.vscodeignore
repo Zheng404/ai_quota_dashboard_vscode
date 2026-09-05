@@ -9,6 +9,13 @@ src/**
 tsconfig.json
 eslint.config.mjs
 vitest.config.ts
+esbuild.browser.mjs
+esbuild.config.mjs
+
+# === Bundled Artifacts ===
+# (esbuild bundle 的 sourcemap 不进包；bundle 本体 out/extension.js 必须进包)
+out/**/*.map
+media/**/*.map
 
 # === Compiled Test Artifacts ===
 # (测试文件不需要打包到扩展中)

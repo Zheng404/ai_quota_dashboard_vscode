@@ -2,6 +2,122 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 共享（浏览器扩展 + VSCode）
+
+- **Cookie Bridge 更名为 Data Bridge，改为推送配额数据、不再传输凭证**（⚠️ 架构级变更）
+  - 浏览器扩展不再向 VSCode 推送任何凭证（Cookie / API Key 均不推），改为浏览器端用自身凭证（Kimi 网页令牌 / MiMo Cookie / GLM API Key）调 API 拉取配额数据，把配额数据推送给 VSCode 展示
+  - 协议端点由 `POST /cookies` 改为 `POST /data`；`source` 由 `ai-quota-cookie-bridge` 改为 `ai-quota-data-bridge`；payload 结构改为 `{source, timestamp, data: [{kind, serviceData}], activeKinds, displayNames}`（`serviceData` 即各服务的 ServiceData + 扩展字段，不含任何凭证）；端口范围 `[37100..37110]`、`/health` 探测密钥、`X-Auth-Token` 机制不变
+  - VSCode 端：`handleCookiePayload()` 重写为 `handleDataPayload()`——更新 Bridge 状态（`connected` / `lastPushAt` / `receivedKinds`）→ 自动创建/更新对应 AI 服务（`dataSource='bridge'`）→ `serviceData` 写入 `bridgeDataStore`（模块级 Map，活到下次推送）→ 热重载 `updateView()`；bridge 数据源的 AI 服务不再发网络请求、不需要也不存储 Secret 凭证
+  - **迁移清理**：Secret Storage 中历史遗留的 bridge 凭证由一次性迁移 `migrateBridgeCredentials()` 清理，完成后写入标记 `aiQuotaDashboard.bridgeSecretsCleared`；手动配置（`dataSource='manual'`）服务不受影响
+  - 浏览器端：`relay.js` 重写为 `gatherAllQuotaData()`（复用 `api/{glm,kimi,mimo}.js` fetcher）+ `relayData(force)`（保留互斥 / 防抖 / 重试队列）；`chrome.cookies.onChanged` 不再触发推送（保留 `cookieChanged` 广播用于浏览器端单服务刷新）；凭证失效检测 + 自动刷新机制保留（浏览器自身拉数依赖有效 Cookie）
+  - Bridge 状态字段 `receivedCredentials` 更名为 `receivedKinds`；内部 kind 仍为 `'bridge'`（无迁移），CSS 类名 `.bridge-*` 未改
+  - 已知行为：bridge-fed 服务被移除后，若浏览器仍推送该 kind 会自动重建；推送数据带 `history` 时会与本地历史按日期去重合并
+  - **兼容性**：要求浏览器扩展与 VSCode 扩展同步更新，旧版（凭证推送协议）浏览器扩展无法连接新版 VSCode
+- **background.js 按职责拆分 + esbuild IIFE 打包链落地**
+  - `browser-common/scripts/background.js`（1585 行单文件）拆分为瘦入口（346 行，仅 init 流程 + 事件监听注册 + 跨模块编排）+ `scripts/lib/` 六个子模块：`config-sync.js`（监控目标 / 显示名称 / 刷新间隔，ESM live binding 共享可变状态）、`bridge-client.js`（Bridge 端口发现 / 推送 / 重试队列 / 互斥锁）、`cookie-utils.js`（Cookie 多策略读取 / JWT 挑选 / 凭证 TTL，纯工具层）、`credential.js`（凭证缓存 / TTL / 失效探测 / 后台标签页刷新）、`kimi-relay.js`（Kimi access_token 被动镜像）、`relay.js`（凭证采集 / 推送 / 防抖与频率限制）；依赖单向无循环（relay → credential → config-sync 等），纯剪切-粘贴零行为变更（bundle 多重集合 diff 仅 2 个机械封装函数差异）
+  - 新增 `vscode/esbuild.browser.mjs` + npm script `build:browser`：background 入口打包为 IIFE 单文件（target es2020、不 minify 便于审查），lib/ 与 protocol/ 全部内联，产物写入 `build/staging/{chrome,firefox}/scripts/background.js`
+  - `build.sh` 重构为 staging 架构：`build/staging/{chrome,firefox}/` = 平台 manifest + icons + rsync(browser-common 全部) + esbuild bundle 覆盖 → 改写 staging manifest version → zip 从 staging 打；源码树 chrome/、firefox/ 全程零接触，彻底消除旧「复制进源码树 → 打包 → 清理」的污染-清理 dance（构建中断不再残留）；zip 显式清单中 `scripts/` 展开为 `scripts/background.js`（IIFE bundle）+ `scripts/kimi-content.js`，`scripts/lib/` 已内联不进包
+  - CI `browser` job 同步新流程：npm ci（esbuild）→ `bash build.sh` → `unzip -l` 断言 `scripts/background.js` 与 `protocol/index.js` 在两平台包内；vsce 打包排除 `esbuild.browser.mjs`
+  - 开发态零影响：源码树 manifest 仍指向 ESM 源码（`scripts/background.js` 直载 `scripts/lib/*` 与 `protocol/`，两浏览器 `type: module` 均支持），unpacked 加载路径不变；content script（`kimi-content.js`）不拆不动（classic 注入限制）
+- **新增 protocol 共享层（`browser-common/protocol/`）**：Data Bridge 推送格式、端口列表、探测密钥、消息 action 名与 relay/重试/超时阈值收敛为单一可信源（纯 JS ESM + JSDoc typedef，`index.js` 唯一入口 + `index.d.ts` 类型出口）
+  - 浏览器端接线：`background.js` / `popup.js` / `shared-ui.js` / `api/kimi.js` 改为经 `protocol/index.js` 引用（`dashboard.js` 经扫描无协议字面量，零改动）；`kimi-content.js` 因 content script 只能 classic 注入无法 ESM import，保持自包含并进漂移守卫白名单
+  - VSCode 端：凭证校验 `hasBridgeCredentials()` 由 server 内联逻辑上移至 protocol；`server.ts` / `extension.ts` 的运行时常量与类型经 esbuild 管线落地后已直 import 单一可信源（原 `vscode/src/bridge/constants.ts` 镜像仅存在于过渡窗口，见下方「VSCode 端」构建管线条目）
+  - 新增 `vscode/src/bridge/protocol.test.ts`：payload 构造与校验契约（空凭证/单凭证/全凭证）、action 名集合完整性、镜像与 protocol JS 模块逐值等价、漂移守卫（fs 扫描双端源码，白名单外断言无裸 `37100` / 探测密钥 / action 字面量）
+  - `build.sh` 打包清单补 `protocol/` 目录（zip 为显式清单制，需显式加入方能入包）
+  - `vscode/package.json` devDependencies 引入 `esbuild`（浏览器 bundle 已由 background 拆分条目消费；VSCode 侧 bundle 见下方构建管线条目）
+
+### VSCode 端
+
+- **Kimi 服务摘除订阅类死字段**：VSCode 端 Kimi 已单路径 Code API（响应不含订阅/会员信息），彻底移除恒为 `undefined` 的 `level` / `membershipTitle` / `currentEndTime` / `nextBillingTime` / `subscriptionStatus` / `subscriptionActive` / `balances` 扩展字段及 `KimiBalance` 类型；同步清理卡片模板（会员等级徽章 / 会员有效期行）、状态栏 tooltip（等级徽章 / 会员有效期）与专属样式中的死渲染分支
+- **构建管线：esbuild 打包 + protocol 直切**
+  - 新增 `vscode/esbuild.config.mjs` + npm script `build` / `clean` / `watch`：扩展入口 `src/extension.ts` 打包为 `out/extension.js`（cjs 单文件 bundle，`external: ['vscode']`，target node16，不 minify 便于审查，sourcemap 不进包）；webview bundle 段就绪（`src/webview/main.ts` → `media/dashboard.js`，iife），入口落地后自动启用
+  - `tsc` 转为纯类型检查（`tsconfig` `noEmit`），解除 rootDir 限制：删除 `vscode/src/bridge/constants.ts` 运行时镜像，`server.ts` / `extension.ts` 直 import `browser-common/protocol/` 单一可信源；契约测试镜像等价段改为基线值锁定，漂移守卫白名单同步收紧
+  - `vscode:prepublish` 改为 `clean && compile && build`（vsce 打包前必跑 bundle，杜绝陈旧 emit 文件混入包）；CI `vscode` job 增加 Build bundles 步骤与 `out/extension.js` 存在断言；`.vscodeignore` 排除 `esbuild.config.mjs` 与 `media/**/*.map`
+- **Webview 前端 TS 化（构建期编译替代字符串模板）**
+  - 新增 `vscode/src/webview/`：`main.ts`（入口：acquireVsCodeApi + updateData/switchToSettings 消息路由 + 渲染调度 + 全局事件绑定）、`shared.ts`（fmtNum/fmtDateTime/escapeHtml/renderSlot/renderService 等）、`settings.ts`（设置页渲染与事件，数据驱动无 kind 硬编码）、`cards/kimi.ts` / `cards/mimo.ts`（卡片模板）——全部 1:1 迁移自字符串版（`dashboard/templates/{shared,settings}.ts` 与 kimi/mimo 的 `template.ts`），函数逻辑与 DOM 输出逐行等价，仅增加类型注解与模块化；消息/payload 契约类型化（`webview/types.ts`，与 extension 侧 postMessage 一致）
+  - `webviewView.ts`：`getHtml()` 切换为外链 bundle（`<script nonce src=asWebviewUri(media/dashboard.js)>`）+ 服务设置元数据注入（`window.__AQD_SETTINGS_META__`）+ compat prelude（暴露 GLM 字符串模板依赖的全局 `vscode` / `serviceTemplates` / `escapeHtml` / `fmtNum` / `fmtDateTime`，迁移期临时，C-3.3 随 GLM 卡片迁移一并移除）；CSP `script-src` 改 `'unsafe-inline' ${cspSource}` 双允许（inline 字符串模板 + 外链 bundle）；HTML 骨架与 styles 注入方式不变
+  - `renderService` 分发：bundle 内置注册表优先，未命中回退 `window.serviceTemplates`（GLM 字符串卡片经 prelude 注册于此）；kimi/mimo 的 `templateScript` 停止注入，`ServiceDescriptor.templateScript` 字段转为可选（迁移期仅 GLM 保留）；bridge 卡片无模板（仪表盘过滤 kind='bridge'，前序版本已移除）
+  - 删除字符串版模板（`dashboard/templates/` 目录与 kimi/mimo 的 `template.ts`）；`tsconfig` lib 补 `DOM`（webview 侧 DOM API 类型）
+- **字符串模板体系最终移除（构建期编译收官）**
+  - 删除 `services/glm/template.ts`（最后一个字符串模板）与 `ServiceDescriptor.templateScript` 字段——卡片渲染唯一通道为 `src/webview/cards/` 经 esbuild 打包的 `media/dashboard.js`
+  - `webviewView.ts` getHtml 收为两段 script：设置元数据注入（`window.__AQD_SETTINGS_META__`，数据通道保留）+ bundle 外链；compat prelude（`vscode` / `serviceTemplates` / `escapeHtml` / `fmtNum` / `fmtDateTime` 全局暴露）整段移除；CSP `script-src` 收紧为 `'nonce-<random>' ${cspSource}`——不再允许 `'unsafe-inline'`，唯一 inline（元数据注入）经 nonce 精确放行
+  - bundle 侧收尾：`renderService` 删除 `window.serviceTemplates` 回退分支（内置注册表唯一分发）；`vscodeApi` 改为 bundle 直接 `acquireVsCodeApi()`（prelude 不再代持）；GLM 卡片移除迁移期的 `stopImmediatePropagation` 短路（字符串版重复委托已不存在）；webview `types.ts` 清理 prelude 服务的 `declare global`（仅保留 `__AQD_SETTINGS_META__`）
+- **GLM 卡片 TS 化（构建链 epic Lane C-3.2，字符串模板迁移收尾）**
+  - 新增 `vscode/src/webview/cards/glm.ts`（408 行）：1:1 迁移自 `services/glm/template.ts` 字符串版（358 行）——前端状态管理（`glmStates` / `getGlmState`）、头部（等级徽章/会员有效期行）、配额卡（MCP detailLine 分支）、SVG 折线图（grid/单点 circle/全零兜底）、模型·工具汇总、主/子 Tab 渲染与切换、`requestDetailRange` 懒加载、GLM 专属点击委托（并入模块自持 `document` 监听器）；函数逻辑与 DOM 输出逐行等价，仅增加类型注解与模块化（prelude 全局 `escapeHtml`/`fmtNum`/`fmtDateTime`/`vscode` 改为从 `shared.ts` 导入，glm 私有 `formatDateTime`/`fmtTokens` 保持模块私有）；`webview/types.ts` 无需改动（`GlmServiceData` 直 import 服务侧类型）
+  - `main.ts` 注册 `registerGlmCard()`（与 kimi/mimo 同模式），GLM 卡片自此走 bundle 内置注册表分发；字符串版模板暂留注入（死重，C-3.3 统一移除 prelude/字符串/`window.serviceTemplates` 回退，本 lane 不动）
+  - 点击委托迁移期保护：bundle 监听器先注册先触发，命中 GLM Tab 点击时 `stopImmediatePropagation` 短路后注册的字符串版同款委托——其内部 `state.data` 恒为 `null`（renderCard 已被内置注册表遮蔽），否则 sub-tab 分支会把已渲染详情覆盖为 loading 并重复 `postMessage` 触发多余详情请求；GLM Tab 与帮助/删除按钮目标互斥，短路不影响 main.ts 通用委托，字符串版删除后该调用自然成为无操作
+  - 等价性验证：git HEAD 字符串版 vs 新 bundle 同输入输出逐字节对比 80 用例全绿（card 段 29 / svg 段 12 / tabs 段 39，覆盖 XSS 转义、空 series、单点 circle、resetsAt 缺省、MCP detailLine 分支、懒加载分支、多状态序列、模拟点击行为序列）；webview bundle 22192 → 35814 B（+13622 B）
+
+## [1.1.1] - 2026-09-04
+
+### 新增 (Added)
+
+- **Kimi 请求头适配 2026 年 WAF 收紧**（VSCode 端 + 浏览器扩展全链路）
+  - `vscode/src/services/kimi/provider.ts`：请求携带完整 Chrome UA（替换原残缺 UA，残缺/默认 UA 会被 WAF 直接拒绝）、`r-timezone` 头（本地 IANA 时区，惰性求值缓存）、`Cookie: kimi-auth=<token>` 与 `Authorization: Bearer` 并存（web 会话要求 Cookie 形态凭证，仅 Bearer 不够）
+  - `browser-common/api/kimi.js`：请求补 `r-timezone` 头；UA 与 Cookie 由浏览器 fetch 自动携带（真实浏览器 UA + kimi.com 域 Cookie，手动设置会被浏览器禁止/覆盖）
+  - `browser-common/scripts/background.js`：`probeCachedCredential` 与 `checkCredentialValidity` 两处凭证探测同步补 `r-timezone`，避免 WAF 误拒导致误判凭证失效、触发可见标签页刷新死循环
+- **Kimi eyJ JWT Cookie 扫描兜底**（浏览器扩展）
+  - `kimi-auth` Cookie 缺失/改名时，扫描 `.kimi.com` 域下 value 以 `eyJ` 开头（JWT 头 base64 特征）的 Cookie 作为凭证
+  - 新增 `pickJwtCookie()` 二级选择：先过滤 eyJ 形态，再优先取名字匹配 `auth`/`token`/`session`/`jwt` 的 Cookie，无名字匹配时回退取第一个（避免误扫埋点/A-B 实验 cookie）
+  - 覆盖采集（`gatherAllCookies`）、本地缓存、推送提取（`relayCookies`）、凭证刷新（`loadCredentialViaBackgroundTab`）全链路；`api/kimi.js` 读取 Cookie 时同样兜底
+  - `chrome.cookies.onChanged` 对 Kimi 域新增：Cookie 名字不在监听名单但 value 呈 JWT 形态时，同样视为凭证变化即时触发推送（其它 kind 行为不变）
+- **Kimi 401 服务端原因诊断**
+  - 401 时从响应体提取 `debug.reason` / `code` 拼入认证错误消息，便于区分凭证过期/风控等服务端原因（VSCode 端 `buildAuthError()` + 浏览器端 `kimiPost`）
+- **Kimi 鉴权机制适配（浏览器侧，被动镜像）**：Kimi 已废弃 `kimi-auth` Cookie（停止续期 + 签名密钥轮换），网页端改用 localStorage `access_token`（~15 分钟）/ `refresh_token`（~90 天）令牌对
+  - 新增 `scripts/kimi-content.js` content script：注入 kimi.com 页面镜像 localStorage 令牌（启动上报 + storage 事件 + 60s 轮询三重触发），**不调用 RefreshToken 端点**（单消费者，接管会踢网页下线）
+  - `background.js`：新增 relay 存储（内存 + storage.local 双写）与按需索取（向打开的 kimi.com 标签页广播询问，2s 超时）；`relayCookies` 供值链改为 relay access_token 优先，legacy cookie 链降为兜底；payload 结构不变（VSCode 端零改动）
+  - `api/kimi.js`：popup/dashboard 优先向 background 索取 relay token，legacy cookie 读取保留为兜底；无凭证引导文案更新
+  - `chrome`/`firefox` manifest 注册 content_scripts（`https://www.kimi.com/*`）
+  - 注入兜底与诊断：新增 `scripting` 权限，relay 为空时自动 `chrome.scripting.executeScript` 编程注入已有标签页（免手动刷新页面）；`tabs.query` 补裸域匹配；content script 空值必应答附 `foundKeys`、上报长度日志，Service Worker 日志可自诊断「脚本未注入 / key 名不符 / token 为空」三类故障
+- **浏览器端 — 共享 UI 工厂 `shared-ui.js`**
+  - 抽取 popup.js 与 dashboard.js 几乎逐行重复的页面逻辑为 `createSharedUI(options)` 工厂（542 行）；页面差异（Bridge 状态卡、自动刷新开关、空态文案、按钮文字等 13 项）经选项注入，两页既有行为与 DOM 约定完全不变
+  - popup.js 754→355 行、dashboard.js 511→117 行；页面专属逻辑保留在各自文件（popup：Bridge 状态检测与服务管理；dashboard：默认服务初始化、GLM 快速添加）
+- **浏览器端 — 本地凭证缓存 24h TTL + 手动清除**
+  - `glmApiKey`（storage.local 副本改为 `{ value, capturedAt }` 对象）、`kimiTokenRelay`、`mimoCredentialCache` 三处凭证缓存统一附加 24 小时 TTL，过期自动失效并重新采集，避免向 VSCode 推送陈旧凭证
+  - popup 设置页新增「清除本地凭证缓存」按钮，一键清除上述三个存储键
+- **浏览器端 — Kimi 双模式凭证**（与 VSCode 端单路径决策配套）
+  - 模式① 网页 token relay（主路径）：复用 content script 镜像的 localStorage `access_token`，展示频率限制明细 / 本周用量 / 月度权益额度 3 槽全量
+  - 模式② Code API Key 手动配置（兜底）：popup 设置页粘贴 `sk-` Key，无网页会话时仍可查看 5h 频限 + 本周用量 2 槽；字段映射与 VSCode 端一致（`usedPercent` 优先、`resetAt` 秒/毫秒/ISO 兼容、`duration === 300 && TIME_UNIT_MINUTE` 精确匹配 5h 窗口，兜底取最短窗口）
+- **VSCode 端 — Kimi Code API Key 单路径支持**
+  - Kimi 服务仅接受 Kimi Code API Key（`sk-` 前缀，Kimi Code 控制台获取，长期有效）：`GET https://api.kimi.com/coding/v1/usages`（国际站 `api.kimi.ai`）→ 「频率限制明细 (5h)」+「本周用量」2 槽；无订阅信息，`level` / 有效期等扩展字段留空
+  - 非 `sk-` 凭证（如网页 JWT Token）直接抛引导错误、不发起任何请求；原网页三要素（完整 UA / `r-timezone` / `kimi-auth` Cookie）请求路径已从 VSCode provider 移除
+- **VSCode 端 — 测试扩充（68→114 用例全绿）**
+  - 新增 `src/bridge/server.test.ts`（9 用例：Host 白名单、401 未认证、415 Content-Type、413 超限、1MB 请求体上限等）
+  - 新增 `src/core/config.test.ts`（14 用例：`saveServiceAtomic` 原子化、Settings 唯一可信源读取、一次性迁移双闸门）
+  - `src/storage/persistence.test.ts` 补 4 用例
+
+### 变更 (Changed)
+
+- **历史持久化过滤错误数据点**：`doPullAll` 保存历史前剔除 `err` 态服务数据，避免错误结果污染 30 天历史曲线
+- **删除 Bridge 仪表盘死代码模板**：Bridge 卡片本就不在仪表盘渲染（仪表盘过滤 `kind === 'bridge'`），移除 `services/bridge/template.ts`，`templateScript` 置空
+- **浏览器端 — 移除 Offscreen 刷新链路与死代码**
+  - 整文件删除：`offscreen.html`（Offscreen 刷新文档）、`constants.js`（探测密钥 `BRIDGE_PROBE_SECRET` 收敛回 `background.js` 内定义，与 VSCode 端 `server.ts` 对齐）、`browser-api.js`（预留未用的 API 兼容层）
+  - background.js 移除 `loadViaOffscreen` / `loadViaMinimizedWindow` / `loadInvisiblePage` / `refreshCredential` 死链函数；Cookie 类凭证（Kimi/MiMo）自动刷新收敛为 `loadCredentialViaBackgroundTab`（后台非激活标签页）单一路径，GLM 为静态 API Key 无刷新载体
+  - Chrome manifest 移除 `offscreen` 权限；build.sh 打包 / 清理清单同步更新
+- **浏览器端 — build.sh 版本号自动化**
+  - `VERSION` 改从 `vscode/package.json` 读取（唯一可信源，消除多处手工同步）；打包时临时改写打包副本的 manifest version（备份 → 改写 → zip → 恢复），源码树零污染
+  - 公共代码同步改用 rsync（排除 `manifest.json` / `icons/`，避免覆盖浏览器专属文件；不可用时回退 cp）
+- **VSCode 端 — saveService 原子化**
+  - Webview `saveService` 消息处理收敛为 `config.saveServiceAtomic()`：先计算目标终态，再按「Secret Storage 成功 → globalState 落盘」顺序两次写入，杜绝「Key 已换、服务配置未更新」（或反之）的半更新不一致状态（取舍论证见 `config.ts` 注释）
+- **VSCode 端 — 全局配置收敛为 Settings 唯一可信源**
+  - 刷新间隔 / 预警阈值 / AFK 阈值三项改为从 VSCode Settings 读取（唯一可信源）；`globalState` 旧值仅作回退，并在回退时触发一次性迁移（把旧值搬入 Settings）
+  - 防重复迁移双闸门：会话内存闸门（迁移失败自动重试）+ `aiQuotaDashboard.configMigrated` 持久标记（跨会话生效）
+- **VSCode 端 — Cookie Bridge 不再消费 Kimi 网页凭证**
+  - 浏览器扩展推送的 `kimiAuthToken`（网页 relay token）仍保留在 payload 中（浏览器端自用），Bridge 分发链路照旧写入 Secret Storage，但 Kimi provider 不再使用网页凭证发请求（非 `sk-` 凭证直接引导错误）；GLM API Key 与 MiMo Cookie 分发行为不变
+
+### 修复 (Fixed)
+
+- **请求日志状态码失真**：`fetch.ts` 的 `doRequest` 返回 `{ result, statusCode }` 结构，请求日志不再对成功响应硬编码 `200`，如实记录真实 HTTP 状态码；同时修正该代码块的缩进错位
+
+### 安全 (Security)
+
+- **Bridge 服务器 Host 头白名单校验**：仅放行 `127.0.0.1:<port>` / `localhost:<port>` 形态的 Host 头，拦截恶意网页将自有域名解析到本机地址后发起的 DNS rebinding 攻击
+- **`/cookies` 端点 Content-Type 校验**：仅接受 `application/json` 请求体（容忍 `; charset=` 后缀），配合 CORS 预检堵住跨源 HTML 表单 CSRF
+- **CORS 允许头补 `X-Bridge-Probe`**：`Access-Control-Allow-Headers` 显式包含自定义探测头，避免未来扩展权限收紧后 `/health` 预检静默失效（当前靠 host_permissions 绕过）
+- **澄清 Bridge 威胁模型**：`server.ts` 头部新增诚实声明——探测密钥随扩展公开发布，双层认证的防御边界是恶意网页与其它浏览器扩展（CSRF / 跨源访问 / DNS rebinding），**不防御本地恶意进程**（任何本地进程可访问 `/health` 获取 authToken 伪造凭证推送）；1.0.0 引入探测密钥时隐含的本地进程防护表述以本条澄清为准
+
 ## [1.1.0] - 2026-06-24
 
 ### 新增 (Added)
@@ -327,6 +443,7 @@
 - Webview JS 为字符串拼接，无类型检查
 - `warnThreshold` 配置声明但未实际触发警告通知
 
+[1.1.1]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.0.0
 [0.9.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v0.9.0

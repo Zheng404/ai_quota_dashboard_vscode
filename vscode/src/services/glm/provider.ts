@@ -180,10 +180,11 @@ function clampPercent(value: number | undefined | null): number {
 	return Math.max(0, Math.min(100, n));
 }
 
-/** 校验时间戳为合法的有限正数（毫秒），否则返回 undefined */
-function sanitizeTimestamp(value: number | undefined | null): number | undefined {
+/** 校验时间戳并防御性转换：GLM 接口 nextResetTime 单位不稳定（历史为秒，现为毫秒），
+ * 小于 1e12 视为秒级时间戳统一转毫秒，非法值返回 undefined */
+export function sanitizeTimestamp(value: number | undefined | null): number | undefined {
 	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) { return undefined; }
-	return value;
+	return value < 1e12 ? value * 1000 : value;
 }
 
 function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: QuotaSlot[]; level?: string } {

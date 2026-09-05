@@ -8,8 +8,10 @@ import { DashboardWebviewViewProvider, SettingsData } from './dashboard/webviewV
 import { CacheManager } from './core/cache';
 import { AfkDetector } from './core/afk';
 import { resolveProvider, isValidServiceId, getDescriptor, getAllDescriptors } from './services/registry';
-import { CookieBridgeServer } from './bridge/server';
-import type { CookiePayload } from './bridge/server';
+import { DataBridgeServer } from './bridge/server';
+import type { DataPayload } from './bridge/server';
+import { BRIDGE_AI_KINDS, resolveBridgeTargets, selectBridgeServicesToRemove, collectBridgeSecretTargets, shouldAcceptBridgeData, summarizeRejectedPushes } from './bridge/targets';
+import { BRIDGE_PORT_START } from '../../browser-common/protocol/index.js';
 import { setBridgeExtensionContext, updateBridgeState } from './services/bridge/state';
 import type { GlmServiceData } from './services/glm/types';
 
@@ -19,7 +21,7 @@ const cache = new CacheManager();
 const serviceData = new Map<string, ServiceData>();
 let dashboardViewProvider!: DashboardWebviewViewProvider;
 const afkDetector = new AfkDetector();
-let bridge: CookieBridgeServer | undefined;
+let bridge: DataBridgeServer | undefined;
 let isLoopRunning = false;
 
 // ===== 配额预警 =====
@@ -69,6 +71,33 @@ class AsyncQueue {
 
 const refreshQueue = new AsyncQueue();
 const bridgeQueue = new AsyncQueue();
+
+/**
+ * Data Bridge 推送的配额数据存储（kind → 最近推送的 serviceData）。
+ * 非 TTL 缓存：数据活到下次推送；bridge 数据源的服务不再发起网络请求，
+ * 仪表盘/状态栏数据均来自这里。
+ */
+const bridgeDataStore = new Map<string, ServiceData>();
+
+/**
+ * 校验并规整 Data Bridge 推送的单服务数据。
+ * 要求 serviceData 为含 slots 数组的对象；id/name/updatedAt 由本端重写，不透传。
+ * 返回 null 表示该条目非法，调用方应跳过。
+ */
+function normalizeBridgeServiceData(item: { kind: string; serviceData: unknown }): ServiceData | null {
+	const sd = item.serviceData;
+	if (!sd || typeof sd !== 'object' || Array.isArray(sd)) { return null; }
+	const candidate = sd as Partial<ServiceData>;
+	if (!Array.isArray(candidate.slots)) { return null; }
+	return {
+		...candidate,
+		id: '',
+		name: '',
+		kind: item.kind,
+		slots: candidate.slots,
+		updatedAt: 0, // 由调用方以推送时间覆写
+	} as ServiceData;
+}
 
 // 正在刷新中的服务 ID 集合，随 updateData 推送给前端用于显示加载指示
 const refreshingIds = new Set<string>();
@@ -140,7 +169,25 @@ async function fetchSingleService(
 	bar: StatusBar,
 ): Promise<boolean> {
 	const key = await config.getKey(profile.id);
-	// Cookie Bridge 服务的 fetch 仅读本地状态（不调用远程 API），不需要凭证，
+	// Data Bridge 数据源（dataSource='bridge'）的 AI 服务：数据由浏览器扩展推送，
+	// 有推送数据直接返回（不走网络请求、不要求 key）；无数据返回骨架让前端显示加载卡。
+	if (profile.dataSource === 'bridge' && BRIDGE_AI_KINDS.has(profile.kind)) {
+		const pushed = bridgeDataStore.get(profile.id);
+		const data: ServiceData = pushed
+			? { ...pushed, id: profile.id, name: profile.displayName }
+			: {
+				id: profile.id,
+				name: profile.displayName,
+				kind: profile.kind,
+				slots: [],
+				updatedAt: Date.now(),
+			};
+		bar.feed(data);
+		serviceData.set(profile.id, data);
+		cache.set(profile.id, data, 60);
+		return true;
+	}
+	// Data Bridge 服务（kind='bridge'）的 fetch 仅读本地状态（不调用远程 API），不需要凭证，
 	// 允许 key 为空时继续，确保刚添加的 Bridge 服务能立即显示状态卡片。
 	if (!key && profile.kind !== 'bridge') { return false; }
 
@@ -243,7 +290,12 @@ async function doPullAll(bar: StatusBar, ctx: vscode.ExtensionContext): Promise<
 		if (hasResult) {
 			bar.flush();
 			await updateView();
-			await saveHistory(ctx, serviceData, config.loadProfiles());
+			// 过滤掉错误态的服务数据，避免错误结果污染 30 天历史曲线
+			const validData = new Map<string, ServiceData>();
+			for (const [id, data] of serviceData) {
+				if (!data.err) { validData.set(id, data); }
+			}
+			await saveHistory(ctx, validData, config.loadProfiles());
 			// 配额预警检查
 			checkQuotaWarnings();
 		} else {
@@ -280,7 +332,7 @@ async function afterConfigChange(bar: StatusBar, ctx: vscode.ExtensionContext, m
 		// 刷新数据（直接调用内部逻辑，避免嵌套队列死锁）
 		await doPullAll(bar, ctx);
 		// 服务列表变化后，按需启动/停止 Bridge 服务器
-		// （用户添加 Cookie Bridge 服务后启动，移除后停止）
+		// （用户添加 Data Bridge 服务后启动，移除后停止）
 		await syncBridgeLifecycle(bar, ctx);
 		if (msg) {
 			vscode.window.showInformationMessage(msg);
@@ -290,7 +342,7 @@ async function afterConfigChange(bar: StatusBar, ctx: vscode.ExtensionContext, m
 
 // ====== Webview 设置 ======
 function setupWebview(ctx: vscode.ExtensionContext) {
-	dashboardViewProvider = new DashboardWebviewViewProvider();
+	dashboardViewProvider = new DashboardWebviewViewProvider(ctx.extensionUri);
 	ctx.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			DashboardWebviewViewProvider.viewType,
@@ -344,6 +396,12 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const profiles = config.loadProfiles();
 			const profile = profiles.find(p => p.id === serviceId);
 			if (!profile) { return; }
+
+			// Data Bridge 数据源的服务：数据由浏览器扩展推送（仅含当日详情），不支持范围懒加载
+			if (profile.dataSource === 'bridge') {
+				vscode.window.showInformationMessage('该服务数据由 Data Bridge 推送，仅提供当日详情');
+				return;
+			}
 
 			const key = await config.getKey(serviceId);
 			if (!key) { return; }
@@ -411,26 +469,17 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const defaultKind = getAllDescriptors()[0]?.kind ?? 'glm';
 			const kind = isValidServiceId(d.kind) ? d.kind : defaultKind;
 			const key = typeof d.key === 'string' ? d.key : '';
-			const dataSource = (kind === 'bridge' ? 'bridge' : (d.dataSource === 'bridge' ? 'bridge' : 'manual')) as 'manual' | 'bridge';
+			// 数据来源推导：Bridge 服务恒为 'bridge'；AI 服务有 key（用户在设置页手动输入）即 'manual'，
+			// 无 key 保持原 dataSource（bridge-fed 服务维持 Bridge 推送语义）
+			const dataSource = (kind === 'bridge'
+				? 'bridge'
+				: (key ? 'manual' : (d.dataSource === 'bridge' ? 'bridge' : 'manual'))) as 'manual' | 'bridge';
 			if (!id) { return; }
-			await config.updateService(id, { displayName: name });
-			// 仅在 kind 真正变化时才清空并重新设置 key，避免非原子操作丢 Key
-			const oldProfile = config.loadProfiles().find(p => p.id === id);
-			if (oldProfile) {
-				if (oldProfile.kind !== kind) {
-					await config.updateServiceKind(id, kind);
-				}
-				// 数据来源切换时清理旧 key
-				if (oldProfile.dataSource !== dataSource) {
-					await config.updateServiceKey(id, '');
-				}
-			}
-			// 更新数据来源模式
-			await config.updateServiceDataSource(id, dataSource);
-			// Bridge 服务不保存 key；AI 服务保存手动输入的 key
-			if (dataSource === 'manual') {
-				await config.updateServiceKey(id, key);
-			}
+			// 原子化保存：先在内存计算最终态（profile 字段 + secret 内容 + dataSource 标记），
+			// 再按「先写 Secret、后写 globalState」两次写入落盘，替代原先最多 5 次独立写入。
+			// 旧语义（kind 变化清旧 key、manual/bridge 数据来源切换清 key）已收敛进最终态计算，
+			// 取舍论证见 ConfigManager.saveServiceAtomic 注释。
+			await config.saveServiceAtomic(id, { displayName: name, kind, dataSource, key });
 			await afterConfigChange(bar, ctx, '服务配置已保存');
 		})
 	);
@@ -466,11 +515,34 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 				'确认删除',
 			);
 			if (confirmed !== '确认删除') { return; }
-			await config.removeService(id);
-			serviceData.delete(id);
+
+			const profiles = config.loadProfiles();
+			const target = profiles.find(p => p.id === id);
+			await removeServiceAndCleanup(id, ctx);
+
+			// 级联删除：移除 Data Bridge 服务时，其派生的 bridge-fed AI 服务一并清理。
+			// 级联安全：这些服务纯派生（无用户凭证、数据来自浏览器推送），下次推送自动重建。
+			// 须在 Bridge 服务器停止（afterConfigChange → syncBridgeLifecycle）之前执行。
+			if (target?.kind === 'bridge') {
+				const fedIds = selectBridgeServicesToRemove(profiles, []).map(p => p.id);
+				for (const fedId of fedIds) {
+					await removeServiceAndCleanup(fedId, ctx);
+					log(`[Bridge] 级联移除 bridge-fed 服务: ${fedId}`);
+				}
+			}
+
 			await afterConfigChange(bar, ctx, '服务已移除');
 		})
 	);
+}
+
+/** 单条服务移除的完整清理：profile + 推送数据 + 缓存 + Secret（removeService 命令与级联共用） */
+async function removeServiceAndCleanup(id: string, ctx: vscode.ExtensionContext): Promise<void> {
+	await config.removeService(id);
+	serviceData.delete(id);
+	bridgeDataStore.delete(id);
+	// 防御孤儿凭证：removeService 内部已清 Secret，此处幂等补刀
+	await ctx.secrets.delete(`apiKeys.${id}`);
 }
 
 function registerSettingsCommands(ctx: vscode.ExtensionContext, bar: StatusBar, loop: () => Promise<void>) {
@@ -478,7 +550,7 @@ function registerSettingsCommands(ctx: vscode.ExtensionContext, bar: StatusBar, 
 		vscode.commands.registerCommand('aiQuotaDashboard.saveGlobal', async (data: unknown) => {
 			if (!data || typeof data !== 'object') { return; }
 			const d = data as SaveGlobalPayload;
-			const refreshInterval = typeof d.refreshInterval === 'number' ? d.refreshInterval : 600;
+			const refreshInterval = typeof d.refreshInterval === 'number' ? d.refreshInterval : 60;
 			const warnThreshold = typeof d.warnThreshold === 'number' ? d.warnThreshold : 0.8;
 			const afkThreshold = typeof d.afkThreshold === 'number' ? d.afkThreshold : 3600;
 			await config.setPollInterval(refreshInterval);
@@ -534,12 +606,7 @@ async function startPolling(loop: () => Promise<void>) {
  * Bridge 服务自身不受影响。
  */
 async function syncRemoveBridgeServices(profiles: ServiceProfile[], activeKinds: string[]): Promise<ServiceProfile[]> {
-	const activeSet = new Set(activeKinds);
-	const toRemove = profiles.filter(p =>
-		BRIDGE_AI_KINDS.has(p.kind) &&
-		p.dataSource === 'bridge' &&
-		!activeSet.has(p.kind)
-	);
+	const toRemove = selectBridgeServicesToRemove(profiles, activeKinds);
 
 	if (toRemove.length === 0) {
 		return profiles;
@@ -554,10 +621,7 @@ async function syncRemoveBridgeServices(profiles: ServiceProfile[], activeKinds:
 	return config.loadProfiles().filter(p => !removeIds.has(p.id));
 }
 
-// ====== Cookie Bridge ======
-
-/** Bridge 自动创建的 AI 服务 kind 集合 */
-const BRIDGE_AI_KINDS = new Set(['glm', 'kimi', 'mimo']);
+// ====== Data Bridge ======
 
 /**
  * 对 AI 服务 profiles 按 kind 去重。
@@ -597,115 +661,146 @@ async function deduplicateAiProfiles(profiles: ServiceProfile[]): Promise<Servic
 }
 
 /**
- * 处理浏览器扩展推送的凭证：更新 Bridge 状态、分发到对应 AI 服务、刷新视图。
- * 抽成模块级函数，供 ensureBridgeRunning 注册为 CookieBridgeServer 回调。
+ * 处理浏览器扩展推送的配额数据：更新 Bridge 状态、分发到对应 AI 服务（写入
+ * bridgeDataStore）、刷新视图。空 data 的同步 payload 走「清空 receivedKinds +
+ * 按 activeKinds 同步移除」路径，同样合法。
+ * 抽成模块级函数，供 ensureBridgeRunning 注册为 DataBridgeServer 回调。
  */
-function handleCookiePayload(payload: CookiePayload, bar: StatusBar, ctx: vscode.ExtensionContext) {
+function handleDataPayload(payload: DataPayload, bar: StatusBar, ctx: vscode.ExtensionContext) {
 	bridgeQueue.enqueue(async () => {
-		log(`[Bridge] 收到凭证推送 (cookies=${payload.cookies?.length ?? 0}, kimi=${!!payload.kimiAuthToken}, mimo=${!!payload.mimoCookie}, glm=${!!payload.glmApiKey})`);
+		// 防御：契约保证 data 为数组，缺失/损坏时按空同步处理
+		const items = Array.isArray(payload.data) ? payload.data : [];
+		const activeKinds = Array.isArray(payload.activeKinds) ? payload.activeKinds : [];
+		log(`[Bridge] 收到数据推送 (kinds=${items.map(d => d?.kind).filter(Boolean).join(', ') || '(none)'})`);
 
-		// 收集已接收的凭证种类
-		const receivedCredentials: string[] = [];
-		if (payload.kimiAuthToken) { receivedCredentials.push('kimi'); }
-		if (payload.mimoCookie) { receivedCredentials.push('mimo'); }
-		if (payload.glmApiKey) { receivedCredentials.push('glm'); }
-
-		// 更新 Bridge 服务状态
+		// 更新 Bridge 服务状态（已接收数据的服务种类；空推送清空列表）
 		await updateBridgeState({
 			lastPushAt: payload.timestamp,
-			receivedCredentials,
+			receivedKinds: items.map(d => d.kind),
 			connected: true,
 			lastError: undefined,
 		});
 
-		// 分发凭证到对应的 AI 服务（自动写入 Secret Storage 并标记 dataSource='bridge'）
-		// 如果对应的 AI 服务不存在，自动创建
+		// 同步移除/去重：浏览器扩展已删除的服务在 VSCode 端同步删除；
+		// 同一 kind 重复的 bridge 服务去重（manual 服务不参与，保护用户数据）
 		let profiles = config.loadProfiles();
-		// 先去重：同一 kind 的 AI 服务只保留一个，避免 Bridge 多次推送后产生重复服务
 		profiles = await deduplicateAiProfiles(profiles);
-		// 同步移除：浏览器扩展已删除的服务，在 VSCode 端也删除
-		profiles = await syncRemoveBridgeServices(profiles, payload.activeKinds ?? []);
+		profiles = await syncRemoveBridgeServices(profiles, activeKinds);
 
-		const credentialMap: Array<{ kind: string; value: string | undefined }> = [
-			{ kind: 'kimi', value: payload.kimiAuthToken },
-			{ kind: 'mimo', value: payload.mimoCookie },
-			{ kind: 'glm', value: payload.glmApiKey },
-		];
-		let distributed = false;
-		for (const { kind, value } of credentialMap) {
-			if (!value) { continue; }
-			// 每次循环重新加载，确保看到最新状态
-			profiles = config.loadProfiles();
-			const existing = profiles.find(x => x.kind === kind);
-			if (existing) {
-				// 已有对应服务，更新凭证
-				await config.updateServiceKey(existing.id, value);
-				await config.updateServiceDataSource(existing.id, 'bridge');
-				// Bridge 推送的显示名称若变化，同步更新（仅对 bridge 数据源的服务生效，保护手动重命名）
-				const bridgeName = payload.displayNames?.[kind];
-				if (existing.dataSource === 'bridge' && typeof bridgeName === 'string' && bridgeName.length > 0 && bridgeName !== existing.displayName) {
-					await config.updateService(existing.id, { displayName: bridgeName });
-				}
-				log(`[Bridge] 凭证已分发到 ${existing.displayName} (${kind})`);
-			} else {
-				// 自动创建对应 AI 服务；创建前双重检查，防止并发/队列间隙产生重复
-				try {
-					const doubleCheck = config.loadProfiles().find(x => x.kind === kind);
-					if (doubleCheck) {
-						await config.updateServiceKey(doubleCheck.id, value);
-						await config.updateServiceDataSource(doubleCheck.id, 'bridge');
-						// Bridge 推送的显示名称若变化，同步更新
-						const bridgeName = payload.displayNames?.[kind];
-						if (doubleCheck.dataSource === 'bridge' && typeof bridgeName === 'string' && bridgeName.length > 0 && bridgeName !== doubleCheck.displayName) {
-							await config.updateService(doubleCheck.id, { displayName: bridgeName });
-						}
-						log(`[Bridge] 凭证已分发到 ${doubleCheck.displayName} (${kind})`);
-					} else {
-						const descriptor = getDescriptor(kind);
-						const displayName = payload.displayNames?.[kind] || descriptor?.displayName || kind;
-						const newId = await config.addService(kind, displayName);
-						await config.updateServiceKey(newId, value);
-						await config.updateServiceDataSource(newId, 'bridge');
-						log(`[Bridge] 自动创建 ${displayName} 服务并分发凭证 (${kind})`);
-					}
-				} catch (e) {
-					logError(`[Bridge] 自动创建 ${kind} 服务失败`, e);
-				}
-			}
-			distributed = true;
+		// 解析分发目标（R1：只接管 bridge-fed 服务；manual 服务绝不修改、其 Secret 绝不删除）
+		const targets = resolveBridgeTargets(config.loadProfiles(), items);
+		for (const kind of targets.skipped) {
+			log(`[Bridge] 跳过未知 kind 的数据: ${kind}`);
 		}
 
-		// 更新 Bridge 服务自身视图
+		// 自动创建缺失的 bridge-fed 服务（与既有 manual 服务并存，互不干扰）
+		for (const kind of targets.create) {
+			try {
+				const descriptor = getDescriptor(kind);
+				const displayName = payload.displayNames?.[kind] || descriptor?.displayName || kind;
+				const newId = await config.addService(kind, displayName);
+				await config.updateServiceDataSource(newId, 'bridge');
+				// 新服务无凭证可清，防御性删除（幂等）
+				await ctx.secrets.delete(`apiKeys.${newId}`);
+				const created = config.loadProfiles().find(x => x.id === newId);
+				if (created) {
+					targets.update.set(kind, created);
+					log(`[Bridge] 自动创建 ${displayName} 服务并接收数据 (${kind})`);
+				}
+			} catch (e) {
+				logError(`[Bridge] 自动创建 ${kind} 服务失败`, e);
+			}
+		}
+
+		// 分发数据（单项 containment：单个 kind 失败不影响其余）
+		const rejected: Array<{ kind: string; err: string }> = [];
+		for (const [kind, target] of targets.update) {
+			try {
+				const item = items.find(d => d.kind === kind);
+				if (!item) { continue; }
+				const svcData = normalizeBridgeServiceData(item);
+				if (!svcData) {
+					logError(`[Bridge] 非法的 serviceData，跳过 (${kind})`, JSON.stringify(item.serviceData)?.slice(0, 200));
+					continue;
+				}
+
+				// 防降级（最优先）：本次推送带 err 且 store 中已有无 err 好数据 → 保留旧数据，
+				// 不覆盖、不合并、updatedAt 保持旧值让前端感知时效；其他 kind 不受影响
+				const previous = bridgeDataStore.get(target.id);
+				if (!shouldAcceptBridgeData(previous, svcData)) {
+					logError(`[Bridge] ${kind} 推送数据带 err，保留既有好数据`, svcData.err);
+					rejected.push({ kind, err: svcData.err ?? '(未知错误)' });
+					refreshingIds.delete(target.id);
+					continue;
+				}
+
+				// 清除该 bridge-fed 服务 Secret Storage 中的遗留 key
+				// （Data Bridge 模式下数据由浏览器推送，本端不消费凭证；
+				//   targets 只含 bridge-fed profile，manual 服务绝不会成为删除对象）
+				await ctx.secrets.delete(`apiKeys.${target.id}`);
+
+				// Bridge 推送的显示名称若变化，同步更新
+				let name = target.displayName;
+				const bridgeName = payload.displayNames?.[kind];
+				if (typeof bridgeName === 'string' && bridgeName.length > 0 && bridgeName !== target.displayName) {
+					await config.updateService(target.id, { displayName: bridgeName });
+					name = bridgeName;
+				}
+
+				// 写入 bridgeDataStore（updatedAt 用推送时间），并合并旧数据中已懒加载的其它范围详情
+				const stored: ServiceData = { ...svcData, id: target.id, name, updatedAt: payload.timestamp };
+				const oldData = bridgeDataStore.get(target.id) ?? serviceData.get(target.id);
+				if (oldData) {
+					mergeDetailRanges(stored, oldData);
+				}
+				bridgeDataStore.set(target.id, stored);
+				serviceData.set(target.id, stored);
+				cache.set(target.id, stored, 60);
+				bar.feed(stored);
+				refreshingIds.delete(target.id);
+				log(`[Bridge] 数据已分发到 ${name} (${kind})`);
+			} catch (e) {
+				logError(`[Bridge] 分发 ${kind} 数据失败`, e);
+			}
+		}
+
+		// Y4：有防降级拒绝项时更新 Bridge 诊断信息（桥未断，connected 保持 true；
+		// lastError 供服务标签页诊断区展示，区分「凭证失效推送被拒」与「数据本来就旧」）。
+		// 须先于下方 Bridge 服务自身视图刷新，保证诊断信息随本轮视图生效。
+		const lastError = summarizeRejectedPushes(rejected);
+		if (lastError !== undefined) {
+			await updateBridgeState({ lastError });
+		}
+
+		// Bridge 服务自身视图：写 'connected' 标记并刷新其状态数据
 		profiles = config.loadProfiles();
 		const bridgeProfile = profiles.find(p => p.kind === 'bridge');
 		if (bridgeProfile) {
 			await config.updateServiceKey(bridgeProfile.id, 'connected');
+			try {
+				const bd = await resolveProvider('bridge').fetch('', bridgeProfile.endpoint);
+				bd.id = bridgeProfile.id;
+				bd.name = bridgeProfile.displayName;
+				serviceData.set(bridgeProfile.id, bd);
+				cache.set(bridgeProfile.id, bd, 60);
+				bar.feed(bd);
+			} catch (e) {
+				logError('[Bridge] Bridge 服务状态刷新失败', e);
+			}
+			refreshingIds.delete(bridgeProfile.id);
 		}
 
-		// 清除缓存并刷新所有服务（Bridge 推送的新凭证需要生效）
-		if (distributed || bridgeProfile) {
-			cache.clear();
-			// 热重载：不清空 serviceData，保留旧数据让前端卡片不中断。
-			// 标记当前所有服务为刷新中，前端在按钮处显示转圈（旧数据保留）。
-			refreshingIds.clear();
-			for (const p of config.loadProfiles()) {
-				refreshingIds.add(p.id);
-			}
-			// 推一次视图（旧数据 + 刷新标记）
-			await updateView();
-			try {
-				await pullAll(bar, ctx);
-			} catch (err) {
-				logError('[Bridge] pullAll 刷新失败，已更新视图', err);
-				// 即使拉取失败，也确保视图与当前 profiles 保持一致
-				await updateView();
-			}
-		}
+		// 热重载：数据已在 bridgeDataStore / serviceData 中就位，仅推视图让前端刷新
+		bar.flush();
+		await updateView();
+	}).catch((err: unknown) => {
+		// Y5：承接队列任务异常，消灭 unhandled rejection
+		logError('[Bridge] 处理数据推送失败', err);
 	});
 }
 
 /**
- * 若 Cookie Bridge 服务已添加但服务器未运行，则启动服务器。
+ * 若 Data Bridge 服务已添加但服务器未运行，则启动服务器。
  * 服务器仅在用户添加了 kind='bridge' 的服务后才会监听，符合"添加后才启用"语义。
  * 已运行则直接返回（幂等）。
  */
@@ -714,18 +809,18 @@ async function ensureBridgeRunning(bar: StatusBar, ctx: vscode.ExtensionContext)
 
 	// 先用局部变量持有，启动成功后才赋值给模块级 bridge，
 	// 避免 start() 失败后 bridge 指向未监听的实例，导致后续 ensureBridgeRunning 永远命中 `if (bridge) return` 无法自愈
-	const candidate = new CookieBridgeServer(
-		(payload: CookiePayload) => handleCookiePayload(payload, bar, ctx),
+	const candidate = new DataBridgeServer(
+		(payload: DataPayload) => handleDataPayload(payload, bar, ctx),
 		outputChannel,
 	);
 
 	try {
-		const port = await candidate.start(37100);
+		const port = await candidate.start(BRIDGE_PORT_START);
 		bridge = candidate;
 		ctx.subscriptions.push(bridge);
-		log(`Cookie Bridge 已启动，监听端口: ${port}`);
+		log(`Data Bridge 已启动，监听端口: ${port}`);
 	} catch (err) {
-		logError('Cookie Bridge 启动失败', err);
+		logError('Data Bridge 启动失败', err);
 		// 失败时清理候选实例（释放可能已占用的资源），不赋值给 bridge，下次可重试
 		await candidate.dispose().catch(() => { /* ignore */ });
 		await updateBridgeState({ connected: false, lastError: `启动失败: ${err instanceof Error ? err.message : String(err)}` });
@@ -734,7 +829,7 @@ async function ensureBridgeRunning(bar: StatusBar, ctx: vscode.ExtensionContext)
 
 /**
  * 若当前不存在 kind='bridge' 的服务，则停止 Bridge 服务器（若有）。
- * 用户移除 Cookie Bridge 服务后，服务器随之关闭，不再监听端口、不再接收推送。
+ * 用户移除 Data Bridge 服务后，服务器随之关闭，不再监听端口、不再接收推送。
  */
 async function stopBridgeIfIdle(ctx: vscode.ExtensionContext) {
 	const hasBridge = config.loadProfiles().some(p => p.kind === 'bridge');
@@ -747,7 +842,7 @@ async function stopBridgeIfIdle(ctx: vscode.ExtensionContext) {
 	if (idx >= 0) { ctx.subscriptions.splice(idx, 1); }
 	bridge = undefined;
 	await updateBridgeState({ connected: false });
-	log('Cookie Bridge 已停止（用户未添加 Cookie Bridge 服务）');
+	log('Data Bridge 已停止（用户未添加 Data Bridge 服务）');
 }
 
 /**
@@ -760,6 +855,28 @@ async function syncBridgeLifecycle(bar: StatusBar, ctx: vscode.ExtensionContext)
 	} else {
 		await stopBridgeIfIdle(ctx);
 	}
+}
+
+/** Data Bridge 遗留凭证清理的持久标记（写入后不再重复执行） */
+const BRIDGE_SECRETS_CLEARED_KEY = 'aiQuotaDashboard.bridgeSecretsCleared';
+
+/**
+ * 一次性迁移：Data Bridge 改造后，bridge 数据源的 AI 服务不再消费 Secret Storage
+ * 中的任何凭证（数据改由浏览器扩展推送）。清理目标见 collectBridgeSecretTargets
+ * （条件放宽：dataSource 缺失 || 'bridge'，覆盖 dataSource 字段出现之前的旧版
+ * bridge-fed 服务；显式 'manual' 的用户手输凭证绝不可清理）。
+ * 幂等：标记存在即跳过。
+ *
+ * 执行顺序注意：必须在 migrateBridgeDataSource 之前运行——后者会把缺失的
+ * dataSource 落盘为 'manual'，导致本迁移永远匹配不到旧 profile（R2 回归点）。
+ */
+async function migrateBridgeCredentials(ctx: vscode.ExtensionContext): Promise<void> {
+	if (ctx.globalState.get<boolean>(BRIDGE_SECRETS_CLEARED_KEY, false)) { return; }
+	const targets = collectBridgeSecretTargets(config.loadProfiles());
+	for (const id of targets) {
+		await ctx.secrets.delete(`apiKeys.${id}`);
+	}
+	await ctx.globalState.update(BRIDGE_SECRETS_CLEARED_KEY, true);
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
@@ -776,6 +893,9 @@ export async function activate(ctx: vscode.ExtensionContext) {
 
 	config.setContext(ctx);
 	await config.initDefaults();
+	// 顺序不可对调（R2）：credentials 迁移须先于 dataSource 迁移执行，
+	// 否则缺失 dataSource 的旧 profile 会被落盘为 'manual' 而永远清不掉遗留凭证
+	await migrateBridgeCredentials(ctx);
 	await config.migrateBridgeDataSource();
 
 		const bar = new StatusBar();
@@ -810,7 +930,7 @@ export async function activate(ctx: vscode.ExtensionContext) {
 		registerNavigationCommands(ctx);
 		setupActivityListeners(ctx);
 
-		// Cookie Bridge：仅在用户已添加 Cookie Bridge 服务时启动
+		// Data Bridge：仅在用户已添加 Data Bridge 服务时启动
 		// 用户通过设置页添加/移除该服务后，afterConfigChange 会同步生命周期
 		await syncBridgeLifecycle(bar, ctx);
 

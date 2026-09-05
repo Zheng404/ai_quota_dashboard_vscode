@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
+import { randomBytes } from 'crypto';
 import { ServiceData, ServiceProfile } from '../core/types';
 import { getStyles } from './styles';
-import { getScript } from './templates/index';
 import { getAllDescriptors } from '../services/registry';
+import type { ServiceSettingsMeta } from '../webview/types';
 
 export interface SettingsData {
   profiles: ServiceProfile[];
@@ -22,11 +23,13 @@ export class DashboardWebviewViewProvider
   private settings: SettingsData = {
     profiles: [],
     keys: {},
-    refreshInterval: 600,
+    refreshInterval: 60,
     warnThreshold: 0.8,
     afkThreshold: 3600,
   };
   private messageDisposable?: vscode.Disposable;
+
+  constructor(private readonly extensionUri: vscode.Uri) {}
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -123,12 +126,32 @@ export class DashboardWebviewViewProvider
     this.view = undefined;
   }
 
+  /** 从注册表提取服务设置元数据（注入 webview bundle，数据驱动设置页） */
+  private buildSettingsMeta(): ServiceSettingsMeta[] {
+    return getAllDescriptors().map(d => ({
+      kind: d.kind,
+      displayName: d.displayName,
+      keyPlaceholder: d.settings.keyPlaceholder,
+      keyHint: d.settings.keyHint,
+      showHelpButton: d.settings.showHelpButton,
+      helpCommand: d.helpCommand ?? '',
+    }));
+  }
+
   private getHtml(webview: vscode.Webview): string {
+    const nonce = randomBytes(16).toString('base64');
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'dashboard.js'),
+    );
+    const settingsMeta = JSON.stringify(this.buildSettingsMeta());
+
+    // CSP：script-src 不再允许 'unsafe-inline'（字符串模板体系已移除）；
+    // 唯一的 inline 脚本是元数据注入，经 nonce 指令精确放行，bundle 走 cspSource 外链
     return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'unsafe-inline';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 ${getStyles()}
@@ -147,12 +170,8 @@ ${getStyles()}
 	<div class="tab-panel" id="panel-services"></div>
 	<div class="tab-panel" id="panel-global"></div>
 </div>
-<script>
-(function() {
-	const vscode = acquireVsCodeApi();
-${getScript()}
-})();
-</script>
+<script nonce="${nonce}">window.__AQD_SETTINGS_META__=${settingsMeta};</script>
+<script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }

@@ -1,8 +1,11 @@
 /**
- * AI Quota Dashboard — 完整模板系统
+ * AI Quota Dashboard — 模板系统（观测台视觉）
  *
- * 包含共享工具函数 + GLM/Kimi/MiMo 各服务的卡片渲染模板
+ * 共享工具函数 + GLM/Kimi/MiMo 各服务的卡片渲染模板。
+ * 图表：Catmull-Rom → 三次贝塞尔平滑曲线 + 总量面积渐变 + pathLength 描绘动画。
  */
+
+import { icon } from './icons.js';
 
 // ====== 共享工具函数 ======
 
@@ -40,6 +43,9 @@ function fmtTokens(n) {
 
 const serviceTemplates = {};
 
+// 图表渐变 id 计数器（避免 SVG defs id 冲突）
+let chartGradientSeq = 0;
+
 // ====== GLM 模板 ======
 
 const glmStates = {};
@@ -76,56 +82,60 @@ function getToolUsageForRange(data, range) {
 }
 
 function getModelColor(modelName) {
-	if (modelName === 'Token 消耗总量') return '#666';
+	if (modelName === 'Token 消耗总量') return '#6cb8ff';
 	const colors = {
-		'GLM-5.1': '#4A90D9',
-		'GLM-5': '#4A90D9',
-		'GLM-5-Turbo': '#9B59B6',
-		'GLM-4.7': '#E67E22',
-		'GLM-4': '#E67E22',
-		'GLM-4.6V': '#2ECC71',
-		'GLM-4.5-Air': '#1ABC9C',
-		'GLM-4V': '#F39C12',
+		'GLM-5.1': '#6cb8ff',
+		'GLM-5': '#6cb8ff',
+		'GLM-5-Turbo': '#b48cf2',
+		'GLM-4.7': '#e8835a',
+		'GLM-4': '#e8835a',
+		'GLM-4.6V': '#7ef0c9',
+		'GLM-4.5-Air': '#5ad8c4',
+		'GLM-4V': '#f2b84b',
 	};
-	return colors[modelName] || '#888';
+	return colors[modelName] || '#8a94a6';
 }
 
 function getToolColor(toolCode) {
 	const colors = {
-		'search-prime': '#4A90D9',
-		'web-reader': '#E67E22',
-		'zread': '#2ECC71',
+		'search-prime': '#6cb8ff',
+		'web-reader': '#e8835a',
+		'zread': '#7ef0c9',
 	};
-	return colors[toolCode] || '#888';
+	return colors[toolCode] || '#8a94a6';
 }
 
-function renderGlmHeader(data) {
+/** Data Bridge 状态行（GLM / Kimi / MiMo 头部共用结构） */
+function renderBridgeLine(prefix, bridgeStatus) {
+	if (!bridgeStatus) return '';
+	const stateClass = bridgeStatus === 'connected' ? 'is-connected' : bridgeStatus === 'active' ? 'is-waiting' : 'is-off';
+	const bridgeText = bridgeStatus === 'connected' ? '已连接' : bridgeStatus === 'active' ? '等待 VSCode 连接' : '未启用';
+	return `<div class="${prefix}-header-row ${prefix}-header-row3">`
+		+ `<span class="bridge-line ${stateClass}">${icon('radio-tower', 11)}Data Bridge · ${bridgeText}</span>`
+		+ `</div>`;
+}
+
+function renderGlmHeader(data, index) {
 	const level = data.level || '';
 	const levelBadge = level ? `<span class="glm-level-badge">${escapeHtml(level.toUpperCase())}</span>` : '';
 	const renewLine = data.nextRenewTime
-		? `<div class="glm-header-row glm-header-row3"><span class="glm-renew-label">会员有效期至：</span><span class="glm-renew-time">${escapeHtml(data.nextRenewTime)}</span></div>`
-		: '';
-	// Cookie Bridge 状态
-	const bridgeStatus = data.bridgeStatus;
-	const bridgeText = bridgeStatus === 'connected' ? '已连接' : bridgeStatus === 'active' ? '等待 VSCode 连接' : '未启用';
-	const bridgeColor = bridgeStatus === 'connected' ? '#22c55e' : bridgeStatus === 'active' ? '#f59e0b' : '#ef4444';
-	const bridgeLine = bridgeStatus
-		? `<div class="glm-header-row glm-header-row3" style="margin-top: 2px;"><span style="font-size: 10px; color: ${bridgeColor};">🍪 Cookie Bridge: ${bridgeText}</span></div>`
+		? `<div class="glm-header-row glm-header-row3"><span class="glm-renew-label">会员有效期至</span><span class="glm-renew-time">${escapeHtml(data.nextRenewTime)}</span></div>`
 		: '';
 	return `<div class="glm-header">`
 		+ `<div class="glm-header-row">`
 		+ `<div class="glm-header-left">`
+		+ `<span class="svc-index">№ ${String(index + 1).padStart(2, '0')}</span>`
 		+ `<span class="glm-user-name">${escapeHtml(data.name)}</span>`
 		+ levelBadge
 		+ `</div>`
-		+ `<button class="btn btn-icon btn-refresh-svc glm-refresh-btn" data-service-id="${data.id}" title="刷新"><svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M883.875 684.806c41.592-90.131 47.607-188.11 23.715-277.077-27.468-102.682-95.063-194.238-193.08-249.865l43.48-93.961-247.21 64.819 110.564 230.424 45.491-98.308c66.606 40.672 112.204 104.396 131.498 176.146 17.257 64.639 13.024 134.926-17.145 200.514-38.445 83.352-110.309 140.105-192.603 162.245a296.78 296.78 0 0 1-36.221 7.297l51.033 105.49c4.853-1.129 9.665-2.263 14.447-3.572 113.302-30.203 213.143-109.249 266.031-224.152z m-524.696 82.476c-67.595-40.598-113.886-104.87-133.367-177.273-17.252-64.64-12.985-134.967 17.145-200.48 38.447-83.386 110.31-140.141 192.605-162.28 13.646-3.651 27.541-6.275 41.587-7.957l-50.886-106.037c-6.676 1.426-13.353 2.956-19.957 4.744-113.266 30.272-213.141 109.317-266.07 224.221-41.511 90.097-47.533 188.11-23.639 277.038l0.073 0.293c27.686 103.375 96.083 195.406 195.196 250.886l-41.111 89.661 246.955-65.694-111.329-230.022-47.202 102.9z m0 0" fill="currentColor"/></svg></button>`
+		+ `<button class="btn btn-icon btn-refresh-svc glm-refresh-btn" data-service-id="${data.id}" title="刷新">${icon('refresh-cw', 13)}</button>`
 		+ `</div>`
 		+ `<div class="glm-header-row glm-header-row2">`
 		+ `<span class="glm-service-name">GLM Coding Plan (CN)</span>`
 		+ `<span class="glm-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ renewLine
-		+ bridgeLine
+		+ renderBridgeLine('glm', data.bridgeStatus)
 		+ `</div>`;
 }
 
@@ -139,16 +149,16 @@ function renderGlmQuotaCard(slot) {
 	const color = getColorClass(pct);
 	let detailLine = '';
 	if (slot.label === 'MCP 每月额度' && slot.used != null && slot.limit != null) {
-		detailLine = `<div class="glm-quota-detail-line">已调用次数：${fmtNum(slot.used)}&nbsp;&nbsp;&nbsp;&nbsp;总量：${fmtNum(slot.limit)}</div>`;
+		detailLine = `<div class="glm-quota-detail-line">已调用 ${fmtNum(slot.used)} / 总量 ${fmtNum(slot.limit)}</div>`;
 	}
 	let resetLine = '';
 	if (slot.resetsAt) {
-		resetLine = `<div class="glm-quota-reset">重置时间：${fmtDateTime(new Date(slot.resetsAt))}</div>`;
+		resetLine = `<div class="glm-quota-reset">${icon('clock', 10)}重置 ${fmtDateTime(new Date(slot.resetsAt))}</div>`;
 	}
 	return `<div class="glm-quota-card">`
 		+ `<div class="glm-quota-header">`
 		+ `<span class="glm-quota-label">${escapeHtml(slot.label)}</span>`
-		+ `<span class="glm-quota-percent">${pct.toFixed(0)}%<span class="glm-quota-used">已使用</span></span>`
+		+ `<span class="glm-quota-percent"><span class="num" data-count="${pct.toFixed(0)}">0</span>%<span class="glm-quota-used">已使用</span></span>`
 		+ `</div>`
 		+ `<div class="progress-bar glm-progress"><div class="progress-fill ${color}" style="width:${pct.toFixed(1)}%"></div></div>`
 		+ detailLine
@@ -186,7 +196,7 @@ function renderGlmDetailContent(data, state) {
 }
 
 function renderGlmLoading() {
-	return '<div class="glm-loading">数据加载中...</div>';
+	return `<div class="glm-loading"><span class="spin"></span>数据加载中...</div>`;
 }
 
 function renderGlmModelDetail(usage, range) {
@@ -210,13 +220,13 @@ function renderGlmModelDetail(usage, range) {
 	const chart = renderGlmChart(usage.modelSeries.concat(totalSeries), usage.xTime, 'tokens', range);
 	const summaryItems = usage.modelSummary.map(m =>
 		`<div class="glm-summary-item">`
-		+ `<span class="glm-summary-dot" style="background:${getModelColor(m.modelName)}"></span>`
+		+ `<span class="glm-summary-dot" style="background:${getModelColor(m.modelName)};color:${getModelColor(m.modelName)}"></span>`
 		+ `<span class="glm-summary-name">${escapeHtml(m.modelName)}</span>`
 		+ `<span class="glm-summary-value">${fmtTokens(m.totalTokens)}</span>`
 		+ `</div>`
 	).join('');
 	const totalItem = `<div class="glm-summary-item">`
-		+ `<span class="glm-summary-dot" style="background:${getModelColor('Token 消耗总量')}"></span>`
+		+ `<span class="glm-summary-dot" style="background:${getModelColor('Token 消耗总量')};color:${getModelColor('Token 消耗总量')}"></span>`
 		+ `<span class="glm-summary-name">Token 消耗总量</span>`
 		+ `<span class="glm-summary-value">${fmtTokens(usage.totalTokens)}</span>`
 		+ `</div>`;
@@ -227,12 +237,37 @@ function renderGlmToolDetail(usage, range) {
 	const chart = renderGlmChart(usage.toolSeries, usage.xTime, 'calls', range);
 	const summaryItems = usage.toolSummary.map(t =>
 		`<div class="glm-summary-item">`
-		+ `<span class="glm-summary-dot" style="background:${getToolColor(t.toolCode)}"></span>`
+		+ `<span class="glm-summary-dot" style="background:${getToolColor(t.toolCode)};color:${getToolColor(t.toolCode)}"></span>`
 		+ `<span class="glm-summary-name">${escapeHtml(t.toolName.replace(/\s*MCP$/, ''))}</span>`
 		+ `<span class="glm-summary-value">${t.totalUsageCount} 次</span>`
 		+ `</div>`
 	).join('');
 	return chart + `<div class="glm-summary-row">${summaryItems}</div>`;
+}
+
+/**
+ * Catmull-Rom 样条 → 三次贝塞尔平滑路径
+ * @param {{x:number,y:number}[]} pts 数据点
+ * @returns {string} SVG path d
+ */
+function smoothPath(pts) {
+	if (pts.length === 0) return '';
+	if (pts.length < 3) {
+		return 'M ' + pts.map(p => `${p.x} ${p.y}`).join(' L ');
+	}
+	let d = `M ${pts[0].x} ${pts[0].y}`;
+	for (let i = 0; i < pts.length - 1; i++) {
+		const p0 = pts[Math.max(0, i - 1)];
+		const p1 = pts[i];
+		const p2 = pts[i + 1];
+		const p3 = pts[Math.min(pts.length - 1, i + 2)];
+		const c1x = p1.x + (p2.x - p0.x) / 6;
+		const c1y = p1.y + (p2.y - p0.y) / 6;
+		const c2x = p2.x - (p3.x - p1.x) / 6;
+		const c2y = p2.y - (p3.y - p1.y) / 6;
+		d += ` C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
+	}
+	return d;
 }
 
 function renderGlmChart(series, xTime, valueKey, range) {
@@ -252,7 +287,7 @@ function renderGlmChart(series, xTime, valueKey, range) {
 	if (globalMax === 0) globalMax = 1;
 	const width = 260;
 	const height = 100;
-	const padding = { top: 5, right: 5, bottom: 25, left: 5 };
+	const padding = { top: 6, right: 6, bottom: 8, left: 6 };
 	const chartW = width - padding.left - padding.right;
 	const chartH = height - padding.top - padding.bottom;
 
@@ -263,7 +298,9 @@ function renderGlmChart(series, xTime, valueKey, range) {
 		};
 	}
 
-	const lines = series.map(s => {
+	const gradientId = `aqd-area-${++chartGradientSeq}`;
+
+	const parts = series.map(s => {
 		const arr = valueKey === 'tokens' ? s.tokensUsage : s.usageCount;
 		if (!arr || arr.length === 0) return '';
 		const color = valueKey === 'tokens' ? getModelColor(s.modelName) : getToolColor(s.toolCode);
@@ -272,60 +309,61 @@ function renderGlmChart(series, xTime, valueKey, range) {
 		if (pts.length === 1) {
 			return `<circle cx="${pts[0].x}" cy="${pts[0].y}" r="2" fill="${color}"/>`;
 		}
-		let path = 'M ' + pts[0].x + ' ' + pts[0].y;
-		for (let i = 1; i < pts.length; i++) {
-			path += ' L ' + pts[i].x + ' ' + pts[i].y;
+		const d = smoothPath(pts);
+		// 总量序列追加面积渐变（置于底层）
+		let area = '';
+		if (valueKey === 'tokens' && s.modelName === 'Token 消耗总量') {
+			const areaD = `${d} L ${pts[pts.length - 1].x} ${padding.top + chartH} L ${pts[0].x} ${padding.top + chartH} Z`;
+			area = `<path class="area" fill="url(#${gradientId})" d="${areaD}"/>`;
 		}
-		return `<path fill="none" stroke="${color}" stroke-width="1.5" d="${path}" opacity="0.85"/>`;
+		return `${area}<path class="line" fill="none" stroke="${color}" stroke-width="1.6" d="${d}" opacity="0.9" pathLength="1"/>`;
 	}).join('');
 
-	const labels = '';
+	const defs = `<defs><linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">`
+		+ `<stop offset="0%" stop-color="#6cb8ff" stop-opacity="0.28"/>`
+		+ `<stop offset="100%" stop-color="#6cb8ff" stop-opacity="0"/>`
+		+ `</linearGradient></defs>`;
+
 	let gridLines = '';
-	for (let i = 0; i <= 4; i++) {
-		const y = padding.top + (i / 4) * chartH;
-		gridLines += `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="#e5e7eb" stroke-width="0.5" opacity="0.3"/>`;
+	for (let i = 0; i <= 3; i++) {
+		const y = padding.top + (i / 3) * chartH;
+		gridLines += `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="#1d2531" stroke-width="0.5"/>`;
 	}
-	const svg = `<svg class="glm-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${gridLines}${lines}${labels}</svg>`;
+	const svg = `<svg class="glm-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${defs}${gridLines}${parts}</svg>`;
 	return `<div class="glm-chart-wrap">${svg}</div>`;
 }
 
 serviceTemplates.glm = {
-	renderCard: function(data) {
+	renderCard: function(data, index = 0) {
 		const state = getGlmState(data.id);
 		state.data = data;
-		return `<div class="glm-card" id="glm-card-${data.id}">${renderGlmHeader(data)}${renderGlmQuota(data)}${renderGlmDetailSection(data, state)}</div>`;
+		return `<div class="glm-card svc-glm" id="glm-card-${data.id}">${renderGlmHeader(data, index)}${renderGlmQuota(data)}${renderGlmDetailSection(data, state)}</div>`;
 	}
 };
 
 // ====== Kimi 模板 ======
 
-function renderKimiHeader(data) {
+function renderKimiHeader(data, index) {
 	const level = data.level || '';
 	const levelBadge = level ? `<span class="kimi-level-badge">${escapeHtml(level.toUpperCase())}</span>` : '';
 	const renewLine = data.currentEndTime
-		? `<div class="kimi-header-row kimi-header-row3"><span class="kimi-renew-label">会员有效期至：</span><span class="kimi-renew-time">${escapeHtml(data.currentEndTime)}</span></div>`
-		: '';
-	// Cookie Bridge 状态
-	const bridgeStatus = data.bridgeStatus;
-	const bridgeText = bridgeStatus === 'connected' ? '已连接' : bridgeStatus === 'active' ? '等待 VSCode 连接' : '未启用';
-	const bridgeColor = bridgeStatus === 'connected' ? '#22c55e' : bridgeStatus === 'active' ? '#f59e0b' : '#ef4444';
-	const bridgeLine = bridgeStatus
-		? `<div class="kimi-header-row kimi-header-row3" style="margin-top: 2px;"><span style="font-size: 10px; color: ${bridgeColor};">🍪 Cookie Bridge: ${bridgeText}</span></div>`
+		? `<div class="kimi-header-row kimi-header-row3"><span class="kimi-renew-label">会员有效期至</span><span class="kimi-renew-time">${escapeHtml(data.currentEndTime)}</span></div>`
 		: '';
 	return `<div class="kimi-header">`
 		+ `<div class="kimi-header-row">`
 		+ `<div class="kimi-header-left">`
+		+ `<span class="svc-index">№ ${String(index + 1).padStart(2, '0')}</span>`
 		+ `<span class="kimi-user-name">${escapeHtml(data.name)}</span>`
 		+ levelBadge
 		+ `</div>`
-		+ `<button class="btn btn-icon btn-refresh-svc kimi-refresh-btn" data-service-id="${data.id}" title="刷新"><svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M883.875 684.806c41.592-90.131 47.607-188.11 23.715-277.077-27.468-102.682-95.063-194.238-193.08-249.865l43.48-93.961-247.21 64.819 110.564 230.424 45.491-98.308c66.606 40.672 112.204 104.396 131.498 176.146 17.257 64.639 13.024 134.926-17.145 200.514-38.445 83.352-110.309 140.105-192.603 162.245a296.78 296.78 0 0 1-36.221 7.297l51.033 105.49c4.853-1.129 9.665-2.263 14.447-3.572 113.302-30.203 213.143-109.249 266.031-224.152z m-524.696 82.476c-67.595-40.598-113.886-104.87-133.367-177.273-17.252-64.64-12.985-134.967 17.145-200.48 38.447-83.386 110.31-140.141 192.605-162.28 13.646-3.651 27.541-6.275 41.587-7.957l-50.886-106.037c-6.676 1.426-13.353 2.956-19.957 4.744-113.266 30.272-213.141 109.317-266.07 224.221-41.511 90.097-47.533 188.11-23.639 277.038l0.073 0.293c27.686 103.375 96.083 195.406 195.196 250.886l-41.111 89.661 246.955-65.694-111.329-230.022-47.202 102.9z m0 0" fill="currentColor"/></svg></button>`
+		+ `<button class="btn btn-icon btn-refresh-svc kimi-refresh-btn" data-service-id="${data.id}" title="刷新">${icon('refresh-cw', 13)}</button>`
 		+ `</div>`
 		+ `<div class="kimi-header-row kimi-header-row2">`
 		+ `<span class="kimi-service-name">Kimi Membership</span>`
 		+ `<span class="kimi-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ renewLine
-		+ bridgeLine
+		+ renderBridgeLine('kimi', data.bridgeStatus)
 		+ `</div>`;
 }
 
@@ -340,12 +378,12 @@ function renderKimiQuotaCard(slot) {
 	const color = getColorClass(pct);
 	let resetLine = '';
 	if (slot.resetsAt) {
-		resetLine = `<div class="kimi-quota-reset">重置时间：${fmtDateTime(new Date(slot.resetsAt))}</div>`;
+		resetLine = `<div class="kimi-quota-reset">${icon('clock', 10)}重置 ${fmtDateTime(new Date(slot.resetsAt))}</div>`;
 	}
 	return `<div class="kimi-quota-card">`
 		+ `<div class="kimi-quota-header">`
 		+ `<span class="kimi-quota-label">${escapeHtml(slot.label)}</span>`
-		+ `<span class="kimi-quota-percent">${pct.toFixed(0)}%<span class="kimi-quota-used">已使用</span></span>`
+		+ `<span class="kimi-quota-percent"><span class="num" data-count="${pct.toFixed(0)}">0</span>%<span class="kimi-quota-used">已使用</span></span>`
 		+ `</div>`
 		+ `<div class="progress-bar kimi-progress"><div class="progress-fill ${color}" style="width:${pct.toFixed(1)}%"></div></div>`
 		+ resetLine
@@ -353,40 +391,34 @@ function renderKimiQuotaCard(slot) {
 }
 
 serviceTemplates.kimi = {
-	renderCard: function(data) {
-		return `<div class="kimi-card" id="kimi-card-${data.id}">${renderKimiHeader(data)}${renderKimiQuota(data)}</div>`;
+	renderCard: function(data, index = 0) {
+		return `<div class="kimi-card svc-kimi" id="kimi-card-${data.id}">${renderKimiHeader(data, index)}${renderKimiQuota(data)}</div>`;
 	}
 };
 
 // ====== MiMo 模板 ======
 
-function renderMimoHeader(data) {
+function renderMimoHeader(data, index) {
 	const planName = data.planName || '';
 	const planBadge = planName ? `<span class="mimo-plan-badge">${escapeHtml(planName)}</span>` : '';
 	const expiryLine = data.currentPeriodEnd
-		? `<div class="mimo-header-row mimo-header-row3"><span class="mimo-expiry-label">有效期至：</span><span class="mimo-expiry-time">${escapeHtml(data.currentPeriodEnd)}</span></div>`
-		: '';
-	// Cookie Bridge 状态
-	const bridgeStatus = data.bridgeStatus;
-	const bridgeText = bridgeStatus === 'connected' ? '已连接' : bridgeStatus === 'active' ? '等待 VSCode 连接' : '未启用';
-	const bridgeColor = bridgeStatus === 'connected' ? '#22c55e' : bridgeStatus === 'active' ? '#f59e0b' : '#ef4444';
-	const bridgeLine = bridgeStatus
-		? `<div class="mimo-header-row mimo-header-row3" style="margin-top: 2px;"><span style="font-size: 10px; color: ${bridgeColor};">🍪 Cookie Bridge: ${bridgeText}</span></div>`
+		? `<div class="mimo-header-row mimo-header-row3"><span class="mimo-expiry-label">有效期至</span><span class="mimo-expiry-time">${escapeHtml(data.currentPeriodEnd)}</span></div>`
 		: '';
 	return `<div class="mimo-header">`
 		+ `<div class="mimo-header-row">`
 		+ `<div class="mimo-header-left">`
+		+ `<span class="svc-index">№ ${String(index + 1).padStart(2, '0')}</span>`
 		+ `<span class="mimo-user-name">${escapeHtml(data.name)}</span>`
 		+ planBadge
 		+ `</div>`
-		+ `<button class="btn btn-icon btn-refresh-svc mimo-refresh-btn" data-service-id="${data.id}" title="刷新"><svg width="14" height="14" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path d="M883.875 684.806c41.592-90.131 47.607-188.11 23.715-277.077-27.468-102.682-95.063-194.238-193.08-249.865l43.48-93.961-247.21 64.819 110.564 230.424 45.491-98.308c66.606 40.672 112.204 104.396 131.498 176.146 17.257 64.639 13.024 134.926-17.145 200.514-38.445 83.352-110.309 140.105-192.603 162.245a296.78 296.78 0 0 1-36.221 7.297l51.033 105.49c4.853-1.129 9.665-2.263 14.447-3.572 113.302-30.203 213.143-109.249 266.031-224.152z m-524.696 82.476c-67.595-40.598-113.886-104.87-133.367-177.273-17.252-64.64-12.985-134.967 17.145-200.48 38.447-83.386 110.31-140.141 192.605-162.28 13.646-3.651 27.541-6.275 41.587-7.957l-50.886-106.037c-6.676 1.426-13.353 2.956-19.957 4.744-113.266 30.272-213.141 109.317-266.07 224.221-41.511 90.097-47.533 188.11-23.639 277.038l0.073 0.293c27.686 103.375 96.083 195.406 195.196 250.886l-41.111 89.661 246.955-65.694-111.329-230.022-47.202 102.9z m0 0" fill="currentColor"/></svg></button>`
+		+ `<button class="btn btn-icon btn-refresh-svc mimo-refresh-btn" data-service-id="${data.id}" title="刷新">${icon('refresh-cw', 13)}</button>`
 		+ `</div>`
 		+ `<div class="mimo-header-row mimo-header-row2">`
 		+ `<span class="mimo-service-name">Xiaomi MiMo Token Plan</span>`
 		+ `<span class="mimo-update-time">${fmtDateTime(new Date(data.updatedAt))}</span>`
 		+ `</div>`
 		+ expiryLine
-		+ bridgeLine
+		+ renderBridgeLine('mimo', data.bridgeStatus)
 		+ `</div>`;
 }
 
@@ -404,16 +436,16 @@ function renderMimoQuotaCard(slot) {
 	return `<div class="mimo-quota-card">`
 		+ `<div class="mimo-quota-header">`
 		+ `<span class="mimo-quota-label">${escapeHtml(slot.label)}</span>`
-		+ `<span class="mimo-quota-percent">${pct.toFixed(1)}%<span class="mimo-quota-used">已使用</span></span>`
+		+ `<span class="mimo-quota-percent"><span class="num" data-count="${pct.toFixed(1)}" data-dec="1">0</span>%<span class="mimo-quota-used">已使用</span></span>`
 		+ `</div>`
 		+ `<div class="progress-bar mimo-progress"><div class="progress-fill ${color}" style="width:${pct.toFixed(1)}%"></div></div>`
-		+ `<div class="mimo-quota-detail">已使用：${usedText}&nbsp;&nbsp;总额度：${limitText}</div>`
+		+ `<div class="mimo-quota-detail">已使用 ${usedText} / 总额度 ${limitText}</div>`
 		+ `</div>`;
 }
 
 serviceTemplates.mimo = {
-	renderCard: function(data) {
-		return `<div class="mimo-card" id="mimo-card-${data.id}">${renderMimoHeader(data)}${renderMimoQuota(data)}</div>`;
+	renderCard: function(data, index = 0) {
+		return `<div class="mimo-card svc-mimo" id="mimo-card-${data.id}">${renderMimoHeader(data, index)}${renderMimoQuota(data)}</div>`;
 	}
 };
 
@@ -429,16 +461,16 @@ function renderNoConfig(kind) {
 
 // ====== 调度器 ======
 
-export function renderService(data) {
+export function renderService(data, index = 0) {
 	if (data.err) return renderErrorCard(data);
 	const tmpl = serviceTemplates[data.kind];
 	if (tmpl) {
-		return tmpl.renderCard(data);
+		return tmpl.renderCard(data, index);
 	}
 	return `<div class="service-card error"><div class="service-header"><span class="service-name">${escapeHtml(data.name)}</span><span class="badge badge-error">未注册</span></div><p class="error-message">服务类型 <code>${escapeHtml(data.kind)}</code> 暂无专用仪表盘</p></div>`;
 }
 
-// ====== GLM Tab 切换处理（供 dashboard.js 调用）=======
+// ====== GLM Tab 切换处理（供 dashboard.js / shared-ui.js 调用）=======
 
 export function switchGlmMainTab(svcId, tab) {
 	const state = getGlmState(svcId);

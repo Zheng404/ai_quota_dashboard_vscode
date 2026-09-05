@@ -1,6 +1,5 @@
 import { ServiceDescriptor } from '../types';
 import { mimoProvider } from './provider';
-import { getMimoTemplate } from './template';
 import { MIMO_STYLES } from './styles';
 import { MIMO_SETTINGS } from './settings';
 import { mimoStatusBarRenderer } from './statusBar';
@@ -12,7 +11,7 @@ export const mimoDescriptor: ServiceDescriptor = {
 	badgeLabel: 'MiMo',
 	badgeCssClass: 'badge-mimo',
 	provider: mimoProvider,
-	templateScript: getMimoTemplate(),
+	// 卡片模板已迁 src/webview/cards/mimo.ts（构建期打包进 media/dashboard.js）
 	styles: MIMO_STYLES,
 	settings: MIMO_SETTINGS,
 	statusBarRenderer: mimoStatusBarRenderer,

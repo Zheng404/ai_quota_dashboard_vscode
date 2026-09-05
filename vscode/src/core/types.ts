@@ -17,7 +17,7 @@ export interface ServiceProfile {
 	kind: ServiceId;
 	displayName: string;
 	endpoint?: string;
-	/** 数据来源: 'manual' = 手动输入, 'bridge' = Cookie Bridge */
+	/** 数据来源: 'manual' = 手动输入, 'bridge' = Data Bridge 推送数据源 */
 	dataSource: 'manual' | 'bridge';
 }
 

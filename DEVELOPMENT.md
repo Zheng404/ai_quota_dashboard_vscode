@@ -39,7 +39,7 @@
 | **Node.js** | ≥ 18（推荐 20.x） | 运行 TypeScript 编译、测试和打包 |
 | **npm** | 随 Node.js 安装 | 包管理器 |
 | **VSCode** | ≥ 1.80 | 运行和调试 VSCode 扩展 |
-| **Chrome / Edge** | ≥ 116 | 测试浏览器扩展（Offscreen API 需要 116+） |
+| **Chrome / Edge** | ≥ 116 | 测试浏览器扩展（Manifest V3） |
 | **Firefox** | ≥ 116 | 测试 Firefox 版本（Manifest V3） |
 | **vsce** | 全局安装 | 打包 VSIX：`npm install -g @vscode/vsce` |
 | **Git** | 任意 | 版本控制 |
@@ -67,7 +67,7 @@ ai_quota_dashboard_vscode/
 │   │   │   ├── glm/            # GLM 服务完整包
 │   │   │   ├── kimi/           # Kimi 服务完整包
 │   │   │   ├── mimo/           # MiMo 服务完整包
-│   │   │   └── bridge/         # Cookie Bridge 状态服务（kind='bridge'，状态整合在「服务」标签页）
+│   │   │   └── bridge/         # Data Bridge 状态服务（kind='bridge'，状态整合在「服务」标签页）
 │   │   ├── ui/                 # 状态栏、Webview 仪表盘
 │   │   ├── dashboard/          # Webview 模板与样式
 │   │   ├── storage/            # 历史数据持久化
@@ -76,23 +76,25 @@ ai_quota_dashboard_vscode/
 │   ├── tsconfig.json           # TypeScript 配置（strict 模式）
 │   └── eslint.config.mjs       # ESLint 配置
 ├── browser-common/             # 浏览器扩展共享代码（Chrome/Firefox 共用）
-│   ├── browser-api.js          # 浏览器 API 兼容层
 │   ├── cache.js / config.js    # 缓存与配置管理
-│   ├── constants.js            # 共享常量（BRIDGE_PROBE_SECRET 探测密钥）
-│   ├── popup.html / popup.js   # Popup 仪表盘
-│   ├── dashboard.html / dashboard.js # 独立 Dashboard 页面
+│   ├── shared-ui.js            # Popup/Dashboard 共享 UI 工厂（createSharedUI，页面差异经选项注入）
+│   ├── popup.html / popup.js   # Popup 仪表盘（页面专属逻辑，主体由 shared-ui.js 承载）
+│   ├── dashboard.html / dashboard.js # 独立 Dashboard 页面（同上）
 │   ├── templates.js            # 卡片模板
 │   ├── styles.css              # 样式表
 │   ├── api/                    # API 客户端（glm/kimi/mimo）
+│   ├── protocol/               # Data Bridge 协议共享层（双端单一可信源）
 │   └── scripts/
-│       └── background.js       # Service Worker（Cookie Bridge + 凭证检测）
+│       ├── background.js       # Service Worker 瘦入口（init + 事件注册 + 编排）
+│       ├── lib/                # background 子模块（发布态经 esbuild 内联进 IIFE bundle）
+│       └── kimi-content.js     # Kimi content script（镜像 kimi.com localStorage 令牌）
 ├── chrome/                     # Chrome/Edge 专属（仅 manifest + icons）
 │   ├── manifest.json           # Manifest V3
 │   └── icons/
 ├── firefox/                    # Firefox 专属（仅 manifest + icons）
 │   ├── manifest.json           # Manifest V3 + browser_specific_settings.gecko
 │   └── icons/
-├── build.sh                    # 一键打包脚本（复制共享代码 → 打包 → 清理）
+├── build.sh                    # 一键打包脚本（staging 组装 → esbuild → zip/VSIX，源码树零接触）
 └── .github/workflows/          # CI/CD 工作流
     ├── ci.yml                  # 持续集成
     └── release.yml             # 发版自动发布
@@ -111,25 +113,31 @@ cd vscode
 # 2. 安装依赖
 npm install
 
-# 3. 验证编译
+# 3. 验证类型检查
 npm run compile
+
+# 4. 产出构建产物（F5 调试前必需）
+npm run build
 ```
 
 ### 编译与运行
 
 | 命令 | 作用 |
 |------|------|
-| `npm run compile` | 使用 `tsc` 编译 TypeScript 到 `out/` 目录 |
-| `npm run watch` | 监听模式，文件变更自动重新编译 |
+| `npm run compile` | `tsc` 纯类型检查（noEmit，不产出文件） |
+| `npm run build` | esbuild 打包：extension → `out/extension.js`（cjs）、webview → `media/dashboard.js`（iife） |
+| `npm run watch` | esbuild 监听模式（extension/webview 两个 bundle 同时监听，文件变更自动重建） |
+| `npm run clean` | 清理 `out/` 与 `media/` 构建产物 |
+| `npm run build:browser` | esbuild 打包浏览器扩展 background（IIFE → `build/staging/{chrome,firefox}/scripts/background.js`） |
 | `npm run lint` | 运行 ESLint 检查代码风格 |
 | `npm test` | 运行 vitest 单元测试（一次性） |
 | `npm run test:watch` | 监听模式运行测试 |
-| `npm run vscode:prepublish` | 发布前的预编译 |
+| `npm run vscode:prepublish` | 发布前预检（`clean && compile && build`，vsce 打包时自动触发） |
 
 ```bash
 cd vscode
 
-# 开发模式（终端 1：监听编译）
+# 开发模式（终端 1：监听两个 bundle 重建）
 npm run watch
 
 # 开发模式（终端 2：监听测试）
@@ -137,6 +145,8 @@ npm run test:watch
 ```
 
 ### 调试（F5）
+
+> **前置条件**：先在 `vscode/` 目录执行 `npm run build`（`out/extension.js` 与 `media/dashboard.js` 为 esbuild 产物，`npm run compile` 只做类型检查不产出文件）；日常开发可保持 `npm run watch` 自动重建。
 
 1. 在 VSCode 中打开**项目根目录**作为工作区
 2. 按 `F5` 或点击左侧「运行和调试」→「Run Extension」
@@ -178,7 +188,6 @@ interface ServiceDescriptor {
   badgeLabel: string;                 // 徽章文字
   badgeCssClass: string;              // 徽章 CSS 类
   provider: QuotaProvider;            // 数据拉取逻辑
-  templateScript: string;             // 仪表盘卡片 JS 模板
   styles: string;                     // 专属 CSS
   settings: ServiceSettingsDescriptor; // 设置表单元数据
   statusBarRenderer?: StatusBarRenderer;   // 状态栏渲染器（可选）
@@ -188,6 +197,8 @@ interface ServiceDescriptor {
   helpMessage?: string;               // 帮助提示内容
 }
 ```
+
+> 注：卡片渲染不再属于 ServiceDescriptor（早期 `templateScript` 字段已随构建链移除）——仪表盘卡片为 `src/webview/cards/{kind}.ts` TS 模块，构建期编译进 `media/dashboard.js`，在 `src/webview/main.ts` 显式注册。
 
 **数据流**：
 
@@ -210,7 +221,7 @@ pullAll() 定时触发
 
 > **无缝刷新**：`refreshingIds: Set<string>` 标记正在刷新的服务，随 `updateData` 推送给前端。刷新时保留旧数据，对应服务卡片刷新按钮旋转（`.spinning svg`）；首次加载/新增服务时显示轻量加载骨架卡（`renderLoadingCard`）。仪表盘采用三个平级 tab：仪表盘 / 服务 / 设置。
 
-> **Bridge 按需启停**：Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**（`syncBridgeLifecycle` → `ensureBridgeRunning`），移除后自动关闭（`stopBridgeIfIdle`）。浏览器扩展推送凭证后，VSCode 的 `handleCookiePayload()`（`extension.ts`）会**自动分发**到对应的 AI 服务（GLM/Kimi/MiMo）：写入 Secret Storage 并标记 `dataSource='bridge'`，若对应服务不存在则**自动创建**，并对同一 kind 去重（`deduplicateAiProfiles` 仅清理重复的 bridge 服务，**manual 服务永远不参与去重**）。用户也可在 VSCode 服务标签页把某个服务从 `bridge` 切换为 `manual` 手动输入。Bridge 状态（连接徽章、最后同步、已连接服务标签）整合在「服务」标签页的 Bridge 服务条目内，不在仪表盘单独显示卡片。
+> **Bridge 按需启停**：Bridge 服务器**仅在用户添加了 Data Bridge 服务后启动**（`syncBridgeLifecycle` → `ensureBridgeRunning`），移除后自动关闭（`stopBridgeIfIdle`）。浏览器扩展推送配额数据后，VSCode 的 `handleDataPayload()`（`extension.ts`）会**自动创建/更新**对应的 AI 服务（标记 `dataSource='bridge'`，无需凭证）：推送的 `serviceData` 写入 `bridgeDataStore`（模块级 Map，活到下次推送），bridge 数据源的 AI 服务**不再发网络请求、不需要也不存储 Secret 凭证**。Secret Storage 中历史遗留的 bridge 凭证由一次性迁移 `migrateBridgeCredentials()` 清理（标记 `aiQuotaDashboard.bridgeSecretsCleared`，须先于 `migrateBridgeDataSource()` 执行——后者会把缺失 `dataSource` 的旧 profile 落盘为 `manual`，顺序颠倒会导致清理条件失效）。分发查找只接管 `dataSource='bridge'` 的服务：已存在同 kind 的 manual 服务时另行新建 bridge-fed 服务并存，绝不修改 manual profile、绝不删除其 Secret（见 `bridge/targets.ts` 纯函数 `resolveBridgeTargets`）。bridge-fed 服务**不在服务标签页单独展示**（状态整合在 Data Bridge 条目内）；移除 Data Bridge 服务时级联移除全部 bridge-fed 服务（纯派生可自动重建），改为手动输入的路径是「移除 Data Bridge 服务 → 手动添加同 kind 服务」。Bridge 状态（连接徽章、最后同步、已接收数据种类标签）整合在「服务」标签页的 Bridge 服务条目内，不在仪表盘单独显示卡片。
 
 **注册服务**：在 `src/services/registry.ts` 中导入并注册：
 
@@ -287,33 +298,43 @@ export interface NovaServiceData extends ServiceData {
 }
 ```
 
-#### 第 4 步：编写仪表盘模板
+#### 第 4 步：编写 Webview 卡片渲染模块
 
 ```typescript
-// nova/template.ts
-export function getNovaTemplate(): string {
-  return `
-    serviceTemplates.nova = {
-      renderCard: function(data) {
-        const slots = data.slots || [];
-        let html = '<div class="nova-card">';
-        html += '<h3>' + escapeHtml(data.name) + '</h3>';
-        slots.forEach(function(slot) {
-          html += '<div class="quota-row">';
-          html += '<span>' + slot.label + '</span>';
-          html += '<div class="progress-bar">';
-          html += '<div class="progress-fill" style="width:' + slot.percent + '%"></div>';
-          html += '</div>';
-          html += '<span>' + Math.round(slot.percent) + '%</span>';
-          html += '</div>';
-        });
-        html += '</div>';
-        return html;
-      }
-    };
-  `;
+// src/webview/cards/nova.ts
+import { registerCard } from '../shared';
+import type { WebviewServiceData } from '../types';
+// 共享渲染工具（escapeHtml / fmtNum / SVG 图表等）经模块 import，类型安全
+import { escapeHtml, fmtNum } from '../shared';
+
+export function registerNovaCard() {
+  registerCard('nova', (data: WebviewServiceData) => {
+    const slots = data.slots || [];
+    let html = '<div class="nova-card">';
+    html += '<h3>' + escapeHtml(data.name) + '</h3>';
+    slots.forEach((slot) => {
+      html += '<div class="quota-row">';
+      html += '<span>' + escapeHtml(slot.label) + '</span>';
+      html += '<div class="progress-bar">';
+      html += '<div class="progress-fill" style="width:' + slot.percent + '%"></div>';
+      html += '</div>';
+      html += '<span>' + Math.round(slot.percent) + '%</span>';
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  });
 }
 ```
+
+随后在 `src/webview/main.ts` 顶部显式注册：
+
+```typescript
+import { registerNovaCard } from './cards/nova';
+registerNovaCard();
+```
+
+> 卡片经 esbuild 构建期编译进 `media/dashboard.js`（IIFE bundle），由 `shared.ts` 的 `renderService(data)` 按 `data.kind` 从内置注册表分发；未注册 kind 显式报错。无 inline script、无字符串模板注入。
 
 #### 第 5 步：编写专属样式
 
@@ -365,10 +386,10 @@ export const NOVA_SETTINGS: ServiceSettingsDescriptor = {
 
 AI 服务默认 `dataSource='manual'`（手动输入）。服务标签页根据 `dataSource` 渲染三种形态：
 - `manual`：显示输入框 + 提示
-- `bridge`（由浏览器扩展推送得到）：显示「Cookie Bridge 自动推送」徽章 + 「切换为手动输入」按钮
+- `bridge`（由 Data Bridge 推送得到）：不在服务列表单独展示（状态整合在 Data Bridge 条目内）；移除 Data Bridge 服务时级联移除（纯派生，浏览器下次推送自动重建）
 - `kind='bridge'` 服务本身：显示 Bridge 连接状态徽章
 
-若希望新服务支持浏览器扩展自动同步，还需在 `browser-common/scripts/background.js` 的 `COOKIE_TARGETS` 与 `gatherAll*` 中采集该服务凭证；VSCode 端 `extension.ts` 的 `handleCookiePayload` 分发逻辑按 `kind` 匹配（内置 `glm`/`kimi`/`mimo`，新增 kind 需加入 `BRIDGE_AI_KINDS`）。
+若希望新服务支持 Data Bridge 推送，还需在浏览器扩展 `relay.js` 的 `gatherAllQuotaData()` 中复用 `api/` fetcher、用自身凭证采集该服务配额数据；VSCode 端 `extension.ts` 的 `handleDataPayload` 接收逻辑按 `kind` 匹配（内置 `glm`/`kimi`/`mimo`）。
 
 #### 第 7 步：实现状态栏渲染器（可选）
 
@@ -404,7 +425,6 @@ export const novaStatusBarRenderer: StatusBarRenderer<NovaServiceData> = {
 // nova/index.ts
 import { ServiceDescriptor } from '../types';
 import { novaProvider } from './provider';
-import { getNovaTemplate } from './template';
 import { NOVA_STYLES } from './styles';
 import { NOVA_SETTINGS } from './settings';
 import { novaStatusBarRenderer } from './statusBar';
@@ -416,7 +436,6 @@ export const novaDescriptor: ServiceDescriptor = {
   badgeLabel: 'NOVA',
   badgeCssClass: 'badge-nova',
   provider: novaProvider,
-  templateScript: getNovaTemplate(),
   styles: NOVA_STYLES,
   settings: NOVA_SETTINGS,
   statusBarRenderer: novaStatusBarRenderer,
@@ -445,10 +464,10 @@ const _defaultRegistry = createRegistry([
 样式通过注册表**自动聚合**（`styles.ts` 遍历 `getAllDescriptors()` 收集每个服务的 `desc.styles`），无需手动编辑聚合代码。只需在 `nova/styles.ts` 导出 `NOVA_STYLES` 并在 `nova/index.ts` 的 descriptor 中设置 `styles: NOVA_STYLES` 即可：
 
 **注意事项**：
-- `ServiceProfile` 的 `dataSource` 字段决定凭证来源：`'manual'`（用户手动输入）或 `'bridge'`（浏览器扩展推送）
-- 新增 AI 服务时默认 `dataSource='manual'`；浏览器扩展推送凭证后，`handleCookiePayload` 会自动将其改为 `'bridge'` 并写入 Secret Storage
+- `ServiceProfile` 的 `dataSource` 字段决定数据来源：`'manual'`（用户手动输入凭证）或 `'bridge'`（浏览器扩展推送配额数据）
+- 新增 AI 服务时默认 `dataSource='manual'`；浏览器扩展推送该 kind 的配额数据后，`handleDataPayload` 会自动创建/更新对应服务并标记 `'bridge'`
 - Bridge 服务（`kind='bridge'`）固定 `dataSource='bridge'`，仅用于展示浏览器扩展连接状态
-- 同一 kind 的 bridge 服务会被去重（`deduplicateAiProfiles` 仅清理重复的 bridge 服务，manual 服务不参与去重），避免重复卡片
+- 同一 kind 的 bridge 来源服务由推送自动创建/更新；已知行为：bridge-fed 服务被移除后，若浏览器仍推送该 kind 会自动重建
 
 ### 配置存储与 Bridge 状态持久化
 
@@ -457,46 +476,49 @@ VSCode 扩展的配置与状态持久化位置如下：
 | 数据 | 存储位置 | Key | 说明 |
 |------|---------|-----|------|
 | 服务列表 | `globalState` | `services` | `ServiceProfile[]`，含 `dataSource` 字段（`manual` 或 `bridge`） |
-| API Keys / Cookie | `Secret Storage` | `apiKeys.{serviceId}` | 每个 profile 独立存储；`bridge` 来源由 `handleCookiePayload` 自动写入 |
+| API Keys / Cookie | `Secret Storage` | `apiKeys.{serviceId}` | 每个 profile 独立存储，仅 `manual` 来源服务使用；bridge 数据源服务不存储凭证 |
 | 刷新间隔 | `globalState` + Settings | `refreshInterval` / `aiQuotaDashboard.refreshInterval` | 默认 600 秒，同步写入 Settings |
 | 预警阈值 | `globalState` + Settings | `warnThreshold` / `aiQuotaDashboard.warnThreshold` | 默认 0.8，超阈值触发警告通知（30 分钟冷却） |
 | AFK 阈值 | `globalState` + Settings | `afkThreshold` / `aiQuotaDashboard.afkThreshold` | 默认 3600 秒，同步写入 Settings |
 | 历史数据 | `globalState` | `aiQuotaDashboard.history` | 30 天保留，UTC 按日期去重 |
 | **Bridge 连接状态** | `globalState` | `aiQuotaDashboard.bridgeState` | 由 `bridge/state.ts` 维护（内存 + globalState 双层） |
+| **迁移标记** | `globalState` | `aiQuotaDashboard.bridgeSecretsCleared` | bridge 凭证一次性迁移清理（Secret Storage 历史遗留凭证）完成后写入 |
 
 **Bridge 状态说明**：
 
-- `aiQuotaDashboard.bridgeState` 保存 Bridge 的运行状态：`connected`、`lastPushAt`、`receivedCredentials`（已接收凭证种类数组）、`lastError`。
-- 浏览器扩展推送凭证后，`handleCookiePayload` 先更新该状态摘要，再把凭证**分发到对应的 AI 服务**（写入 Secret Storage 并标记 `dataSource='bridge'`），最后**热重载**刷新（保留旧数据 + 标记 refreshingIds + `pullAll()`）。
-- Bridge 状态（连接徽章、最后同步、已连接服务标签、诊断）整合在「服务」标签页的 Bridge 服务条目内（`settings.ts` 的 `renderServiceItem`），不在仪表盘单独显示卡片。`bridge/provider.ts` 读取 `bridgeState` 生成数据，不拉取远程 API。
-- 凭证分发支持自动创建：若对应 kind 的 AI 服务不存在，会自动创建一个并写入凭证。
+- `aiQuotaDashboard.bridgeState` 保存 Bridge 的运行状态：`connected`、`lastPushAt`、`receivedKinds`（已接收配额数据的服务种类数组）、`lastError`。
+- 浏览器扩展推送配额数据后，`handleDataPayload` 先更新该状态摘要，再**自动创建/更新**对应的 AI 服务（标记 `dataSource='bridge'`）：推送的 `serviceData` 写入 `bridgeDataStore`（模块级 Map，活到下次推送），最后**热重载**刷新（保留旧数据 + 标记 refreshingIds + `updateView()`）。
+- Bridge 状态（连接徽章、最后同步、已接收数据种类标签、诊断）整合在「服务」标签页的 Bridge 服务条目内（`settings.ts` 的 `renderServiceItem`），不在仪表盘单独显示卡片。`bridge/provider.ts` 读取 `bridgeState` 生成数据，不拉取远程 API。
+- bridge 数据源的 AI 服务不再发网络请求、不需要也不存储 Secret 凭证；历史遗留 bridge 凭证由一次性迁移 `migrateBridgeCredentials()` 清理。
 - Bridge 服务器**按需启停**：`syncBridgeLifecycle` 检查是否存在 `kind='bridge'` profile，有则 `ensureBridgeRunning` 启动监听，无则 `stopBridgeIfIdle` 关闭。
 
 ---
 
 ## 浏览器扩展开发
 
-浏览器扩展（Cookie Bridge）是**纯 JavaScript**，无需构建步骤。
+浏览器扩展（Data Bridge）为**纯 JavaScript**：开发态共享代码为 ESM 直载（manifest `type: module`，无需构建），发布态 background 经 esbuild 打包为 IIFE 单文件（见「构建与打包」）。
 
 ### 本地测试加载
 
-> **注意**：`chrome/` 和 `firefox/` 目录仅包含 `manifest.json` 和 `icons/`，共享代码存放在 `browser-common/`。加载前需要先运行 `build.sh` 将共享代码复制进去，或手动复制 `browser-common/` 的文件到对应目录。
+> **说明**：`chrome/` 和 `firefox/` 目录仅含 `manifest.json` 和 `icons/`，共享代码在 `browser-common/`。运行 `./build.sh` 后，完整的可加载目录在 `build/staging/{chrome,firefox}/`（共享代码 + IIFE bundle + 改写过 version 的 manifest）；源码树目录全程零接触。
 
 #### Chrome / Edge
 
-1. 在项目根目录运行 `./build.sh` 复制共享代码到 `chrome/`
+1. 在项目根目录运行 `./build.sh` 组装 staging
 2. 打开浏览器，进入 `chrome://extensions/`
 3. 开启右上角「开发者模式」
 4. 点击「加载已解压的扩展程序」
-5. 选择 `chrome/` 目录
+5. 选择 `build/staging/chrome/` 目录
 6. 扩展图标会出现在工具栏，点击 `Alt+Q` 可快速打开弹窗
+
+> 想以 ESM 源码态（未 bundle）调试 background：自行组装目录（如 `cp -r browser-common/* chrome-src/` 后补平台 manifest/icons），源码 manifest 本就指向 ESM 源码路径，两浏览器均可直载。
 
 #### Firefox
 
-1. 在项目根目录运行 `./build.sh` 复制共享代码到 `firefox/`
+1. 在项目根目录运行 `./build.sh` 组装 staging
 2. 打开 `about:debugging#/runtime/this-firefox`
 3. 点击「临时载入附加组件」
-4. 选择 `firefox/manifest.json`
+4. 选择 `build/staging/firefox/manifest.json`
 5. 扩展会立即加载，重启浏览器后需重新加载（临时扩展特性）
 
 ### 调试 Service Worker
@@ -504,7 +526,7 @@ VSCode 扩展的配置与状态持久化位置如下：
 #### Chrome
 
 1. 进入 `chrome://extensions/`
-2. 找到「AI Quota Cookie Bridge」，点击「Service Worker」链接
+2. 找到「AI Quota Dashboard」，点击「Service Worker」链接
 3. 会打开 DevTools，可在 Console 查看日志、在 Sources 设置断点
 
 #### Firefox
@@ -517,43 +539,44 @@ VSCode 扩展的配置与状态持久化位置如下：
 
 ### background.js 职责
 
-浏览器扩展作为**统一凭证推送端**，负责将浏览器侧获取的全部凭证（Kimi/MiMo Cookie + GLM API Key）推送给 VSCode，VSCode 端自动分发到对应的 AI 服务：
+浏览器扩展作为**统一配额数据推送端**，用自身凭证（Kimi 网页令牌 / MiMo Cookie / GLM API Key）调 API 拉取配额数据，把**配额数据**（而非凭证）推送给 VSCode，VSCode 端自动创建/更新对应的 AI 服务：
+
+**代码结构**：`scripts/background.js` 为瘦入口（仅 init 流程 + 事件监听注册 + 跨模块编排），具体职责拆分在 `scripts/lib/` 六个子模块——`config-sync.js`（监控目标/显示名称/刷新间隔）、`bridge-client.js`（端口发现/推送/重试队列/互斥锁）、`cookie-utils.js`（Cookie 读取/JWT 挑选）、`credential.js`（凭证缓存/TTL/失效探测/后台标签页刷新）、`kimi-relay.js`（Kimi access_token 被动镜像）、`relay.js`（配额数据采集 `gatherAllQuotaData()` / 推送 `relayData(force)` / 防抖）。开发态 ESM 直载，发布态经 esbuild 内联进 IIFE 单文件。
 
 ```javascript
-// 推送数据示例（POST /cookies，需携带 X-Auth-Token 头）
+// 推送数据示例（POST /data，需携带 X-Auth-Token 头）
 {
-  source: 'ai-quota-cookie-bridge',
+  source: 'ai-quota-data-bridge',
   timestamp: Date.now(),
-  cookies: [
-    { service: 'kimi', name: 'kimi-auth', value: '...', domain: '.kimi.com' },
-    { service: 'mimo', name: 'api-platform_serviceToken', value: '...', domain: '.xiaomimimo.com' },
-    { service: 'mimo', name: 'userId', value: '...', domain: '.xiaomimimo.com' },
+  data: [
+    { kind: 'glm', serviceData: { /* GlmServiceData：slots/history/扩展字段 */ } },
+    { kind: 'kimi', serviceData: { /* KimiServiceData */ } },
+    { kind: 'mimo', serviceData: { /* MimoServiceData */ } },
   ],
-  kimiAuthToken: '...',      // 可直接作为 Bearer Token 使用
-  mimoCookie: 'name=val;...',
-  glmApiKey: '...'           // 浏览器扩展中配置的 GLM API Key
+  activeKinds: ['glm', 'kimi', 'mimo'],
+  displayNames: { glm: '我的 GLM' },
 }
+// 注意：payload 不含任何凭证（Cookie / API Key 均不推送）
 ```
 
 **核心行为**：
 
-1. **全量推送 + VSCode 自动分发**：总是推送 Kimi、MiMo、GLM 三类凭证。VSCode 的 `handleCookiePayload` 收到后自动分发到对应 AI 服务（写入 Secret Storage + `dataSource='bridge'`），不存在则自动创建。同一 kind 仅清理重复的 bridge 服务（manual 服务不参与去重）。
-2. **监听所有目标 Cookie**：`chrome.cookies.onChanged` 监听所有目标域名（`kimi.com`、`xiaomimimo.com`）的目标 Cookie 变化，不受服务启用状态限制。
-3. **凭证变化即时通知**：Cookie 变化时经防抖推送给 VSCode，并广播 `cookieChanged` 消息给所有已打开的 Popup/Dashboard 页面触发单服务刷新。
-4. **定时凭证检测**：通过 `chrome.alarms` 每 30 分钟执行一次凭证存在性、过期时间和 API 探测检查，发现失效时尝试自动刷新（Offscreen API 双层策略 / 最小化弹出窗口降级）。
-5. **端口发现**：启动时遍历 fallback 端口 `[37100..37110]`，对每个端口 `GET /health`（请求头携带打包进扩展的 `X-Bridge-Probe` 探测密钥）探测，密钥校验通过后获取 `authToken` 并维持推送通道。优先尝试上次成功的端口。
+1. **配额数据推送 + VSCode 自动创建/更新**：`relay.js` 的 `gatherAllQuotaData()` 复用 `api/{glm,kimi,mimo}.js` fetcher，用浏览器端自身凭证调 API 拉取全部配额数据，经 `relayData(force)`（保留互斥锁 / 防抖 / 重试队列）推送。VSCode 的 `handleDataPayload` 收到后自动创建/更新对应 AI 服务（`dataSource='bridge'`，无需凭证），并同步移除浏览器已删除的服务（按 `activeKinds`）。
+2. **凭证仅浏览器端自用**：`chrome.cookies.onChanged` 监听所有目标域名（`kimi.com`、`xiaomimimo.com`）的 Cookie 变化，**不再触发 Data Bridge 推送**，仅广播 `cookieChanged` 消息触发浏览器端单服务刷新。
+3. **定时凭证检测**：通过 `chrome.alarms` 按刷新间隔执行凭证检查（下限 5 分钟）：凭证存在性、过期时间和 API 探测（浏览器自身拉数依赖有效 Cookie），发现失效时通过后台非激活标签页（`loadCredentialViaBackgroundTab`）自动刷新，成功后重新推送配额数据。
+4. **端口发现**：启动时遍历 fallback 端口 `[37100..37110]`，对每个端口 `GET /health`（请求头携带打包进扩展的 `X-Bridge-Probe` 探测密钥）探测，密钥校验通过后获取 `authToken` 并维持推送通道。优先尝试上次成功的端口。
 
-> **GLM API Key 说明**：GLM 凭证不是浏览器登录态，而是用户在浏览器扩展 Popup 设置中手动填入、保存在 `chrome.storage.local` 的 API Key，由 `gatherAllStorageCredentials()` 采集后一并推送。
+> **GLM API Key 说明**：GLM 凭证不是浏览器登录态，而是用户在浏览器扩展 Popup 设置中手动填入、保存在 `chrome.storage.local` 的 API Key，仅供浏览器端拉取 GLM 配额使用，不会推送给 VSCode。
 
 ### Chrome 与 Firefox 的差异
 
 | 差异点 | Chrome | Firefox |
 |--------|--------|---------|
-| **Manifest** | 标准 V3 + `offscreen` 权限 | V3 + `browser_specific_settings.gecko` |
+| **Manifest** | 标准 V3（permissions + content_scripts） | V3 + `browser_specific_settings.gecko` |
 | **扩展 ID** | 自动生成 | 需在 manifest 中显式声明 `id` |
 | **Background** | `service_worker`（`type: module`） | `scripts` 数组（`type: module`） |
 | **Cookie API** | `chrome.cookies` | `chrome.cookies`（Firefox 内置兼容） |
-| **凭证刷新** | Offscreen API（fetch → iframe 双层策略） | 最小化弹出窗口降级方案 |
+| **凭证刷新** | 后台标签页（`loadCredentialViaBackgroundTab`） | 同左（两端一致） |
 | **最小版本** | Chrome 116+ | Firefox 116+ |
 | **持久性** | Service Worker 非持久 | 事件页面 |
 
@@ -683,43 +706,40 @@ export default defineConfig({
 
 ### 使用 build.sh
 
-项目根目录提供了一键打包脚本，同时打包浏览器扩展和 VSCode 扩展：
+项目根目录提供了一键打包脚本，同时打包浏览器扩展和 VSCode 扩展。采用 **staging 架构**：源码树 `chrome/`、`firefox/` 全程零接触，无清理段，构建中断不残留：
 
 ```bash
 # 在项目根目录执行
 ./build.sh
 
-# 输出：
+# 输出（版本号自动取自 vscode/package.json，无需手工同步）：
 # build/
-# ├── ai-quota-dashboard-chrome-v1.1.0.zip
-# ├── ai-quota-dashboard-firefox-v1.1.0.zip
-# └── ai-quota-dashboard-x.x.x.vsix
+# ├── ai-quota-dashboard-chrome-v1.1.1.zip
+# ├── ai-quota-dashboard-firefox-v1.1.1.zip
+# ├── ai-quota-dashboard-x.x.x.vsix
+# └── staging/               # 组装目录（chrome/ + firefox/，可 unpacked 调试）
 ```
 
-**脚本逻辑**：
-1. 清理 `build/` 目录
-2. 将 `browser-common/*` 复制到 `chrome/` 和 `firefox/`
-3. 分别打 zip 包（`ai-quota-dashboard-chrome-v1.1.0.zip` / `ai-quota-dashboard-firefox-v1.1.0.zip`）
-4. 清理阶段：从 `chrome/` 和 `firefox/` 中删除复制进来的文件，仅保留 `manifest.json` 和 `icons/`
-5. 检查 `vsce` 是否安装，如已安装则打包 VSCode 扩展
+**脚本流程**：
+
+1. `VERSION` 从 `vscode/package.json` 读取（版本号唯一可信源，消除多处手工同步）
+2. 组装 staging：`build/staging/{chrome,firefox}/` = 平台 `manifest.json` + `icons/` + rsync(`browser-common/` 全部；rsync 不可用时回退 cp)
+3. `npm --prefix vscode run build:browser`：esbuild 将 background（瘦入口 + `scripts/lib/` + `protocol/`）打包为 IIFE 单文件，覆盖 staging 内的 `scripts/background.js`
+4. 改写 **staging 副本** manifest 的 version 后从 staging 打 zip（源码树 manifest 零改动，无需备份/恢复）
+5. zip 为显式清单制：`scripts/` 只含 `background.js`（IIFE bundle）+ `kimi-content.js`，`scripts/lib/` 已内联不进包，`protocol/` 因 popup/dashboard 运行时 import 保留进包
+6. 检查 `vsce` 是否安装，如已安装则打包 VSCode 扩展（内部触发 `vscode:prepublish = clean && compile && build`）
 
 ### 手动打包
 
 #### 浏览器扩展
 
 ```bash
-# Chrome（需要先将 browser-common 复制到 chrome/）
-cp -r browser-common/* chrome/
-cd chrome
-zip -r ../build/ai-quota-dashboard-chrome.zip manifest.json popup.html dashboard.html popup.js dashboard.js templates.js styles.css browser-api.js cache.js config.js api/ scripts/ icons/
+# 推荐：直接使用 build.sh（staging 组装 + esbuild + zip 一步到位）
+./build.sh
 
-# Firefox（需要先将 browser-common 复制到 firefox/）
-cp -r browser-common/* firefox/
-cd firefox
-zip -r ../build/ai-quota-dashboard-firefox.zip manifest.json popup.html dashboard.html popup.js dashboard.js templates.js styles.css browser-api.js cache.js config.js api/ scripts/ icons/
-
-# 清理（打包后删除复制的文件）
-# ... or just use build.sh
+# 仅重建 background bundle（如调试打包产物）
+npm --prefix vscode run build:browser
+# 产物：build/staging/{chrome,firefox}/scripts/background.js
 ```
 
 #### 创建 VSIX
@@ -727,15 +747,15 @@ zip -r ../build/ai-quota-dashboard-firefox.zip manifest.json popup.html dashboar
 ```bash
 cd vscode
 
-# 确保已编译
-npm run compile
+# esbuild 打包（vsce 也会经 vscode:prepublish 自动执行，此处手动跑便于排查）
+npm run build
 
 # 使用 vsce 打包
 vsce package
 
 # 输出：ai-quota-dashboard-x.x.x.vsix
 # 如需指定输出目录
-vsce package --out ../build/
+vsce package --no-dependencies -o ../build/
 ```
 
 **本地安装 VSIX**：
@@ -758,8 +778,8 @@ vsce package --out ../build/
 
 | Job | 说明 |
 |-----|------|
-| `vscode` | 安装依赖 → Lint → 编译 → 测试 → 安全审计 → 打包 VSIX → 上传 Artifact |
-| `browser` | 验证 Manifest JSON → 打包 Chrome/Firefox zip → 上传 Artifact |
+| `vscode` | 安装依赖 → Lint → Compile（类型检查）→ Build（esbuild）→ 断言 `out/extension.js` 产物 → 测试 → vsce 打包 VSIX → 上传 Artifact |
+| `browser` | 安装依赖（esbuild）→ 校验 Manifest JSON → `bash build.sh`（staging 流程）→ `unzip -l` 断言 `scripts/background.js` 与 `protocol/index.js` 在包 → 上传 Artifact |
 
 **Artifact 保留期**：7 天
 
@@ -834,13 +854,14 @@ chore: 构建/工具变更
 #### 按 F5 后 Extension Host 没有加载扩展
 
 - 检查 `npm run compile` 是否成功（无 TypeScript 错误）
-- 确认 `out/extension.js` 存在
+- 确认已执行 `npm run build` 且 `out/extension.js`、`media/dashboard.js` 存在（esbuild 产物，`compile` 不产出）
 - 检查 `.vscode/launch.json` 的 `outFiles` 路径是否正确
 
 #### 仪表盘显示空白或样式错乱
 
-- 检查对应服务的 `templateScript` 是否正确注册到 `serviceTemplates.{kind}`
+- 检查对应服务的卡片模块是否在 `src/webview/main.ts` 中显式调用了 `registerXxxCard()`（未注册 kind 会显式报错）
 - 检查 `dashboard/styles.ts` 是否引入了该服务的 CSS
+- 确认 `npm run build` 已重新产出 `media/dashboard.js`（卡片源码改动需重建 bundle）
 - 在 Webview DevTools 中查看 Console 错误（在 Extension Host 中按 `Ctrl+Shift+P` →「打开 Webview 开发者工具」）
 
 #### API 请求返回 401/403
@@ -903,4 +924,4 @@ Firefox 临时加载的扩展在浏览器重启后会消失，属于正常行为
 
 ---
 
-*本文档最后更新：2026-06-15*
+*本文档最后更新：2026-09-04*

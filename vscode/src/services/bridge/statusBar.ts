@@ -9,7 +9,7 @@ export const bridgeStatusBarRenderer: StatusBarRenderer = {
 	buildTooltipMeta(data: ServiceData): TooltipMeta {
 		return {
 			serviceDisplayName: data.name,
-			extraLines: data.err ? [data.err] : ['Cookie Bridge 状态'],
+			extraLines: data.err ? [data.err] : ['Data Bridge 状态'],
 		};
 	},
 

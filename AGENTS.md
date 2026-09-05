@@ -8,82 +8,130 @@ AI 配额用量仪表盘（不是行为追踪器）。所有配额数据本地�
 
 ### 当前支持的服务
 
-| 服务 | 目录 | 认证方式 | 特色功能 |
+| 服务 | 目录 | 数据来源 | 特色功能 |
 |------|------|---------|---------|
-| Cookie Bridge | `src/services/bridge/` | 浏览器扩展推送 | 凭证中转分发服务，接收浏览器扩展凭证并自动分发到对应 AI 服务，同时展示连接状态和已接收凭证种类 |
-| GLM Coding Plan (CN) | `src/services/glm/` | API Key（手动输入） | 配额卡片 + 模型/工具用量详情 + SVG 曲线图 |
-| Kimi Membership | `src/services/kimi/` | JWT Token（手动输入） | 配额进度条 + 子限额展示 + 会员等级 |
-| Xiaomi MiMo Token Plan | `src/services/mimo/` | Cookie（手动输入） | 套餐用量统计 + 补偿 Token 额度 + 有效期展示 + 自动续费状态 |
+| Data Bridge | `vscode/src/services/bridge/` | 浏览器扩展推送配额数据 | 数据接收服务：浏览器扩展用自身凭证调 API 拉取配额并推送过来，VSCode 自动创建/更新对应 AI 服务（`dataSource='bridge'`），同时展示连接状态和已接收数据种类。**不再传输任何凭证** |
+| GLM Coding Plan (CN) | `vscode/src/services/glm/` | API Key（手动输入）或 Data Bridge 推送 | 配额卡片 + 模型/工具用量详情 + SVG 曲线图 |
+| Kimi Membership | `vscode/src/services/kimi/` | Code API Key（`sk-`，手动输入） | 频率限制明细（5h）+ 本周用量双槽进度条 |
+| Xiaomi MiMo Token Plan | `vscode/src/services/mimo/` | Cookie（手动输入）或 Data Bridge 推送 | 套餐用量统计 + 补偿 Token 额度 + 有效期展示 + 自动续费状态 |
 
 ---
 
 ## 架构总览
 
 ```
-src/
-├── extension.ts              # 扩展入口：activate/deactivate、命令注册、轮询循环
-├── core/                     # 核心模块
-│   ├── types.ts              # 基础类型：ServiceProfile、QuotaSlot、ServiceData 等
-│   ├── config.ts             # 配置管理（globalState + Secret Storage）
-│   ├── fetch.ts              # HTTP 客户端（httpRequest + getJson + postJson）
-│   ├── format.ts             # 数字格式化 (fmtNum)
-│   ├── cache.ts              # 内存缓存管理器 (CacheManager, 60s TTL)
-│   ├── afk.ts                # AFK 检测器 (AfkDetector)
-│   └── *.test.ts             # 单元测试
-├── services/                 # 服务层（ServiceDescriptor 注册表模式）
-│   ├── registry.ts           # 服务注册表：kind → ServiceDescriptor 映射
-│   ├── types.ts              # QuotaProvider / StatusBarRenderer / DetailProvider 接口
-│   ├── bridge/               # Cookie Bridge 服务包
-│   │   ├── index.ts          # Bridge ServiceDescriptor 组装
-│   │   ├── provider.ts       # Bridge 状态数据提供者
-│   │   ├── state.ts          # Bridge 状态持久化（globalState）
-│   │   ├── statusBar.ts      # Bridge 状态栏渲染器
-│   │   ├── template.ts       # Bridge 仪表盘卡片模板
-│   │   ├── styles.ts         # Bridge 专属 CSS
-│   │   └── settings.ts       # Bridge 设置表单元数据
-│   ├── glm/                  # GLM 服务包
-│   │   ├── index.ts          # GLM ServiceDescriptor 组装
-│   │   ├── provider.ts       # GLM 数据拉取 + 解析 + DetailProvider
-│   │   ├── statusBar.ts      # GLM 状态栏渲染器 (StatusBarRenderer)
-│   │   ├── constants.ts      # GLM 配额标签常量
-│   │   ├── types.ts          # GlmServiceData + ModelUsageData + ToolUsageData
-│   │   ├── template.ts       # GLM 仪表盘卡片模板（JS 字符串，含 SVG 图表）
-│   │   ├── styles.ts         # GLM 专属 CSS
-│   │   └── settings.ts       # GLM 设置表单元数据
-│   ├── kimi/                 # Kimi 服务包（结构同 GLM）
-│   │   ├── index.ts
-│   │   ├── provider.ts       # Kimi 数据拉取（Connect 协议）
-│   │   ├── statusBar.ts
-│   │   ├── constants.ts
-│   │   ├── types.ts
-│   │   ├── template.ts
-│   │   ├── styles.ts
-│   │   └── settings.ts
-│   └── mimo/                 # MiMo 服务包（结构同 GLM/Kimi，但无 constants.ts）
-│       ├── index.ts
-│       ├── provider.ts
-│       ├── statusBar.ts
-│       ├── types.ts
-│       ├── template.ts
-│       ├── styles.ts
-│       └── settings.ts
-├── storage/
-│   └── persistence.ts        # 历史数据持久化（globalState，30 天保留）
-├── ui/
-│   ├── statusbar.ts          # 状态栏通用调度器（通过 ServiceDescriptor 分发）
-│   └── statusBarRenderer.ts  # StatusBarRenderer 接口 + 共享工具函数
-├── dashboard/                # 侧边栏 Webview 仪表盘
-│   ├── webviewView.ts        # WebviewViewProvider（HTML 骨架 + 消息路由）
-│   ├── styles.ts             # 通用 CSS + 聚合各服务样式
-│   └── templates/
-│       ├── index.ts          # JS 片段组装入口
-│       ├── shared.ts         # 共享渲染函数 + 模板调度器
-│       └── settings.ts       # 设置页渲染 + 事件绑定（数据驱动，无 kind 硬编码）
-├── commands/
-│   └── index.ts              # clearHistory 命令
-└── test/
-    └── mocks/
-        └── vscode.ts         # VSCode API mock（供 vitest 使用）
+ai_quota_dashboard_vscode/     # 仓库根
+├── vscode/                    # VSCode 扩展
+│   ├── src/
+│   │   ├── extension.ts       # 扩展入口：activate/deactivate、命令注册、轮询循环
+│   │   ├── bridge/
+│   │   │   └── server.ts      # DataBridgeServer：本地 HTTP 服务器（监听 37100..37110，接收浏览器扩展推送的配额数据）
+│   │   ├── core/              # 核心模块
+│   │   │   ├── types.ts       # 基础类型：ServiceProfile、QuotaSlot、ServiceData 等
+│   │   │   ├── config.ts      # 配置管理（Settings 唯一可信源 + Secret Storage + globalState）
+│   │   │   ├── fetch.ts       # HTTP 客户端（httpRequest + getJson + postJson）
+│   │   │   ├── format.ts      # 数字格式化 (fmtNum)
+│   │   │   ├── cache.ts       # 内存缓存管理器 (CacheManager, 60s TTL)
+│   │   │   ├── afk.ts         # AFK 检测器 (AfkDetector)
+│   │   │   └── *.test.ts      # 单元测试（afk/cache/format/types）
+│   │   ├── services/          # 服务层（ServiceDescriptor 注册表模式）
+│   │   │   ├── registry.ts    # 服务注册表：kind → ServiceDescriptor 映射
+│   │   │   ├── types.ts       # QuotaProvider / StatusBarRenderer / DetailProvider 接口
+│   │   │   ├── bridge/        # Data Bridge 服务包
+│   │   │   │   ├── index.ts         # Bridge ServiceDescriptor 组装
+│   │   │   │   ├── provider.ts      # Bridge 状态数据提供者
+│   │   │   │   ├── provider.test.ts # Bridge 状态数据提供者单元测试
+│   │   │   │   ├── state.ts         # Bridge 状态持久化（globalState）
+│   │   │   │   ├── statusBar.ts     # Bridge 状态栏渲染器
+│   │   │   │   ├── styles.ts        # Bridge 专属 CSS（类名 .bridge-*）
+│   │   │   │   ├── settings.ts      # Bridge 设置表单元数据
+│   │   │   │   └── types.ts         # BridgeServiceData 扩展数据类型
+│   │   │   ├── glm/           # GLM 服务包
+│   │   │   │   ├── index.ts         # GLM ServiceDescriptor 组装
+│   │   │   │   ├── provider.ts      # GLM 数据拉取 + 解析 + DetailProvider
+│   │   │   │   ├── provider.test.ts # GLM 数据解析单元测试
+│   │   │   │   ├── statusBar.ts     # GLM 状态栏渲染器 (StatusBarRenderer)
+│   │   │   │   ├── constants.ts     # GLM 配额标签常量
+│   │   │   │   ├── types.ts         # GlmServiceData + ModelUsageData + ToolUsageData
+│   │   │   │   ├── template.ts      # GLM 仪表盘卡片模板（JS 字符串，含 SVG 图表）
+│   │   │   │   ├── styles.ts        # GLM 专属 CSS
+│   │   │   │   └── settings.ts      # GLM 设置表单元数据
+│   │   │   ├── kimi/          # Kimi 服务包（结构同 GLM）
+│   │   │   │   ├── index.ts
+│   │   │   │   ├── provider.ts      # Kimi 数据拉取（Code API，仅 sk- Key 单路径）
+│   │   │   │   ├── provider.test.ts # Kimi 数据解析单元测试
+│   │   │   │   ├── statusBar.ts
+│   │   │   │   ├── constants.ts
+│   │   │   │   ├── types.ts
+│   │   │   │   ├── template.ts
+│   │   │   │   ├── styles.ts
+│   │   │   │   └── settings.ts
+│   │   │   └── mimo/          # MiMo 服务包（结构同 GLM/Kimi，但无 constants.ts）
+│   │   │       ├── index.ts
+│   │   │       ├── provider.ts
+│   │   │       ├── provider.test.ts # MiMo 数据解析单元测试
+│   │   │       ├── statusBar.ts
+│   │   │       ├── types.ts
+│   │   │       ├── template.ts
+│   │   │       ├── styles.ts
+│   │   │       └── settings.ts
+│   │   ├── storage/
+│   │   │   ├── persistence.ts      # 历史数据持久化（globalState，30 天保留）
+│   │   │   └── persistence.test.ts # 历史数据（加载/保存/合并/清理）单元测试
+│   │   ├── ui/
+│   │   │   ├── statusbar.ts              # 状态栏通用调度器（通过 ServiceDescriptor 分发）
+│   │   │   ├── statusBarRenderer.ts      # StatusBarRenderer 接口 + 共享工具函数
+│   │   │   └── statusBarRenderer.test.ts # 倒计时格式化、颜色计算单元测试
+│   │   ├── dashboard/          # 侧边栏 Webview 仪表盘
+│   │   │   ├── webviewView.ts  # WebviewViewProvider（HTML 骨架 + 消息路由 + bundle 外链注入/nonce/CSP）
+│   │   │   └── styles.ts       # 通用 CSS + 聚合各服务样式
+│   │   ├── webview/            # Webview 前端源码（TS 模块，构建期编译为 media/dashboard.js IIFE bundle）
+│   │   │   ├── main.ts         # 前端入口：卡片显式注册 + 消息循环 + 视图调度
+│   │   │   ├── shared.ts       # 内置卡片注册表 + renderService 分发 + vscodeApi 封装
+│   │   │   ├── settings.ts     # 设置页渲染 + 事件绑定（数据驱动，无 kind 硬编码）
+│   │   │   ├── types.ts        # 前端消息/视图类型定义
+│   │   │   └── cards/          # 各服务卡片渲染模块：glm.ts / kimi.ts / mimo.ts（导出 registerXxxCard()）
+│   │   ├── commands/
+│   │   │   └── index.ts        # clearHistory 命令
+│   │   └── test/
+│   │       └── mocks/
+│   │           └── vscode.ts   # VSCode API mock（供 vitest 使用）
+ │   ├── resources/              # 扩展图标（icon.png / icon.svg）
+ │   ├── media/                  # Webview 构建产物（dashboard.js，esbuild 生成，勿手改/勿提交思维）
+ │   ├── out/                    # 扩展构建产物（extension.js cjs bundle，esbuild 生成，勿手改）
+ │   ├── package.json            # 扩展清单（命令、配置、激活事件、构建 scripts）
+ │   ├── tsconfig.json           # TypeScript 类型检查配置（strict + noEmit，emit 由 esbuild 承担）
+ │   ├── esbuild.config.mjs      # VSCode 扩展打包配置（extension → out/、webview → media/）
+ │   ├── esbuild.browser.mjs     # 浏览器扩展 background 打包配置（IIFE → build/staging/）
+ │   ├── vitest.config.ts        # vitest 测试配置
+ │   ├── eslint.config.mjs       # ESLint 配置
+ │   ├── .vscodeignore           # vsce 打包排除清单
+ │   └── CHANGELOG.md
+├── browser-common/             # 浏览器扩展共享代码（Chrome/Firefox 单一可信源）
+│   ├── cache.js                # 基于 storage.local 的带 TTL 缓存（正常 60s / 错误 300s）
+│   ├── config.js               # 集中式配置管理（loadConfig/saveConfig）
+│   ├── shared-ui.js            # Popup/Dashboard 共享 UI 工厂（createSharedUI，页面差异经选项注入）
+│   ├── popup.html / popup.js   # Popup 仪表盘（页面专属逻辑，主体由 shared-ui.js 承载）
+│   ├── dashboard.html / dashboard.js  # 独立仪表盘页面（同上）
+│   ├── styles.css              # 共享样式表
+│   ├── templates.js            # 卡片渲染模板（GLM/Kimi/MiMo + SVG 图表 + Tab 切换）
+│   ├── api/                    # API 客户端：glm.js / kimi.js / mimo.js
+│   ├── protocol/               # Data Bridge 协议共享层（双端单一可信源：常量/消息/DataPayload 构造与校验）
+│   └── scripts/
+│       ├── background.js       # Service Worker 瘦入口（init + 事件注册 + 编排；开发态 ESM 直载）
+│       ├── lib/                # background 子模块（config-sync / bridge-client / cookie-utils / credential / kimi-relay / relay；发布态经 esbuild 内联进 IIFE bundle）│       └── kimi-content.js     # Kimi content script（镜像 kimi.com localStorage 令牌；classic 注入不参与打包）
+├── chrome/                     # Chrome/Edge 专属文件
+│   ├── manifest.json           # Manifest V3（service_worker 模式 + content_scripts）
+│   └── icons/                  # icon16.png / icon48.png / icon128.png
+├── firefox/                    # Firefox 专属文件
+│   ├── manifest.json           # Manifest V3（scripts 数组 + browser_specific_settings.gecko）
+│   └── icons/                  # icon16.png / icon48.png / icon128.png
+├── .github/workflows/          # CI 工作流：ci.yml（构建测试）/ release.yml（发布）
+├── .vscode/                    # 编辑器配置：launch.json（F5 调试）/ tasks.json / settings.json / extensions.json
+├── build.sh                    # 一键打包脚本（浏览器扩展 zip + VSCode VSIX；版本号以 vscode/package.json 为准）
+├── build/                      # 打包产物（chrome/firefox zip + vsix + staging/ 组装目录，由 build.sh 生成；已 gitignore）
+├── README.md / DEVELOPMENT.md / SECURITY.md / AGENTS.md  # 项目文档
+└── LICENSE
 ```
 
 ### 技术栈
@@ -93,11 +141,11 @@ src/
 | 语言 | TypeScript (strict mode) |
 | 运行时 | Node.js (VSCode Extension Host) |
 | 框架 | VSCode Extension API |
-| 构建 | tsc |
+| 构建 | tsc（类型检查 noEmit）+ esbuild（打包：extension cjs / webview iife / background iife） |
 | 代码检查 | ESLint + @typescript-eslint |
 | 测试 | vitest |
 | 数据存储 | globalState + Secret Storage |
-| 可视化 | Webview (内联 HTML/CSS/JS，SVG 图表) |
+| 可视化 | Webview (HTML + 构建期编译 JS `media/dashboard.js`，SVG 图表) |
 
 ### 核心设计模式：ServiceDescriptor 注册表
 
@@ -106,12 +154,11 @@ src/
 ```typescript
 interface ServiceDescriptor {
   kind: ServiceId;              // 'bridge' | 'glm' | 'kimi' | 'mimo' | ...
-  displayName: string;          // 'Cookie Bridge' | 'GLM Coding Plan (CN)'
+  displayName: string;          // 'Data Bridge' | 'GLM Coding Plan (CN)'
   defaultName: string;          // 添加时的默认名称
   badgeLabel: string;
   badgeCssClass: string;
   provider: QuotaProvider;      // 数据拉取逻辑
-  templateScript: string;       // 仪表盘卡片 JS 模板
   styles: string;               // 专属 CSS
   settings: ServiceSettingsDescriptor;  // 设置表单元数据
   statusBarRenderer?: StatusBarRenderer;  // 状态栏渲染器（可选）
@@ -122,7 +169,9 @@ interface ServiceDescriptor {
 }
 ```
 
-新增服务只需在 `src/services/` 新建目录，实现上述结构，然后在 `src/services/registry.ts` 注册即可。`bridge` 服务负责接收浏览器扩展推送的凭证，并自动分发到对应的 AI 服务（GLM/Kimi/MiMo）。凭证写入 Secret Storage 并标记 `dataSource='bridge'` 后，AI 服务即可直接使用，无需手动配置。用户也可在设置页切换为手动输入模式。
+> 注：早期版本含 `templateScript: string` 字段（服务包向 Webview 注入 JS 字符串模板），已随构建链 epic 移除——卡片渲染迁移至 `src/webview/cards/{kind}.ts` TS 模块，经 `main.ts` 显式注册（见「Webview 前端架构」章），具备完整类型检查。
+
+新增服务只需在 `src/services/` 新建目录，实现上述结构，然后在 `src/services/registry.ts` 注册即可。`bridge` 服务（Data Bridge）负责接收浏览器扩展推送的配额数据，并自动创建/更新对应的 AI 服务（标记 `dataSource='bridge'`）。bridge 数据源的 AI 服务**不再发网络请求、不需要也不存储任何凭证**，数据完全来自浏览器推送。同一 kind 可同时存在 manual 与 bridge-fed 服务互不干扰：分发只接管 `dataSource='bridge'` 的服务，若该 kind 已存在 manual 服务则**另行新建** bridge-fed 服务并存，绝不修改 manual profile、绝不删除其 Secret。bridge-fed 服务**不在服务标签页单独展示**（连接状态、已接收数据种类整合在 Data Bridge 条目内）；移除 Data Bridge 服务时**级联移除**全部 bridge-fed 服务（纯派生、无用户凭证，浏览器下次推送自动重建），改为手动输入的路径是「移除 Data Bridge 服务 → 手动添加同 kind 服务」。
 
 ### 数据流
 
@@ -142,21 +191,25 @@ pullAll() 定时触发
     ├─ DashboardWebviewViewProvider.update() → postMessage（含 refreshingIds）
     └─ saveHistory() → globalState 持久化
 
-Cookie Bridge（独立数据流，仅当用户添加了 Cookie Bridge 服务后启动）：
+Data Bridge（独立数据流，仅当用户添加了 Data Bridge 服务后启动）：
 syncBridgeLifecycle() 按需启停：
-    ├─ 有 kind='bridge' profile → ensureBridgeRunning()（启动 CookieBridgeServer 监听 37100）
+    ├─ 有 kind='bridge' profile → ensureBridgeRunning()（启动 DataBridgeServer 监听 37100）
     └─ 无 kind='bridge' profile → stopBridgeIfIdle()（关闭端口、释放资源）
 
-浏览器扩展 → POST /cookies → CookieBridgeServer → handleCookiePayload()
+浏览器扩展 → POST /data → DataBridgeServer → handleDataPayload()
     │
-    ├─ 更新 Bridge 服务状态（连接状态、最后同步时间、已接收凭证种类）
-    ├─ deduplicateAiProfiles() 仅清理重复的 bridge 服务（manual 服务永远不参与去重，保护用户手动输入的凭证）
-    ├─ syncRemoveBridgeServices() 按浏览器 activeKinds 同步移除已废弃服务
-    ├─ 分发凭证到 AI 服务（Kimi/MiMo/GLM → Secret Storage + dataSource='bridge'）
+    ├─ 更新 Bridge 服务状态（connected、lastPushAt、receivedKinds）
+    ├─ 自动创建/更新对应 AI 服务（dataSource='bridge'，无需凭证）
+    ├─ 推送的 serviceData 写入 bridgeDataStore（模块级 Map，活到下次推送）
     ├─ 标记 Bridge profile 为已连接
-    └─ 热重载：保留旧数据 + 标记 refreshingIds + pullAll() 刷新（卡片不中断）
+    └─ 热重载：保留旧数据 + 标记 refreshingIds + updateView()（卡片不中断）
 
-注意：浏览器扩展推送的凭证会自动分发到对应的 GLM/Kimi/MiMo 服务（写入 Secret Storage 并更新 `dataSource='bridge'`），无需手动配置。但 Bridge 服务器仅当用户添加了 Cookie Bridge 服务后才会启动监听。
+注意：bridge 数据源的 AI 服务数据完全来自浏览器扩展推送（浏览器端用自身凭证调 API 拉取），
+VSCode 端不再为其发网络请求、也不存储任何 Secret 凭证。Secret Storage 中历史遗留的 bridge
+凭证由一次性迁移 migrateBridgeCredentials() 清理（标记 aiQuotaDashboard.bridgeSecretsCleared）。
+手动配置（dataSource='manual'）服务不受影响。Bridge 服务器仅当用户添加了 Data Bridge 服务后
+才会启动监听。已知行为：bridge-fed 服务被移除后，若浏览器仍推送该 kind 会自动重建；
+推送数据带 history 时会与本地历史按日期去重合并。
 ```
 
 ---
@@ -173,7 +226,7 @@ interface ServiceProfile {
   kind: ServiceId;
   displayName: string;
   endpoint?: string;
-  dataSource?: 'manual' | 'bridge';  // 认证方式：手动输入或 Cookie Bridge
+  dataSource?: 'manual' | 'bridge';  // 认证方式：手动输入或 Data Bridge 推送
 }
 
 // 配额槽位
@@ -250,7 +303,7 @@ interface ToolUsageData {
   xTime: string[];
 }
 
-// Kimi 专属扩展
+// Kimi 专属扩展（浏览器端网页 token relay 模式使用；VSCode 端 Code API 路径无订阅信息，以下字段留 undefined）
 interface KimiServiceData extends ServiceData {
   level?: string;              // 会员等级名称，如 'Allegretto'
   membershipTitle?: string;
@@ -336,7 +389,7 @@ interface StatusBarRenderer<T extends ServiceData = ServiceData> {
 
 `extension.ts` 维护模块级 `refreshingIds: Set<string>`，记录当前正在刷新的服务 ID。刷新流程采用「热重载」策略，避免数据中断：
 
-1. **标记刷新态**：`pullService` / `doPullAll` / `afterConfigChange` / `handleCookiePayload` 在拉取前把服务 ID 加入 `refreshingIds`
+1. **标记刷新态**：`pullService` / `doPullAll` / `afterConfigChange` / `handleDataPayload` 在拉取前把服务 ID 加入 `refreshingIds`
 2. **推旧数据**：立即 `updateView()`，此时前端拿到旧数据 + refreshingIds，对应服务刷新按钮旋转（`.spinning svg` 动画），卡片内容不中断
 3. **拉取完成**：逐个清除 `refreshingIds` 标记，再次 `updateView()` 推送新数据
 4. **加载骨架卡**：首次添加/无数据的服务显示轻量 `renderLoadingCard`（卡片框架 + 旋转圆环），不再用红色错误卡占位
@@ -347,14 +400,14 @@ const refreshingIds = new Set<string>();  // extension.ts 模块级
 dashboardViewProvider.update(serviceData, settings, Array.from(refreshingIds));
 ```
 
-### Cookie Bridge 按需生命周期
+### Data Bridge 按需生命周期
 
-Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**，而非扩展激活即启动。生命周期由三个函数管理：
+Bridge 服务器**仅在用户添加了 Data Bridge 服务后启动**，而非扩展激活即启动。生命周期由三个函数管理：
 
 | 函数 | 职责 |
 |------|------|
 | `syncBridgeLifecycle(bar, ctx)` | 入口：有 `kind='bridge'` profile 则 `ensureBridgeRunning`，否则 `stopBridgeIfIdle`。在 `activate()` 和每次 `afterConfigChange()` 后调用 |
-| `ensureBridgeRunning(bar, ctx)` | 幂等：若服务器已运行直接返回；否则新建 `CookieBridgeServer`、`start(37100)`、**成功后才**赋值给模块级 `bridge` 并 push subscriptions、注册回调 `handleCookiePayload`。失败时 dispose 候选实例，允许下次重试 |
+| `ensureBridgeRunning(bar, ctx)` | 幂等：若服务器已运行直接返回；否则新建 `DataBridgeServer`、`start(37100)`、**成功后才**赋值给模块级 `bridge` 并 push subscriptions、注册回调 `handleDataPayload`（接收浏览器推送的配额数据）。失败时 dispose 候选实例，允许下次重试 |
 | `stopBridgeIfIdle(ctx)` | 若当前无 Bridge profile，则 `bridge.dispose()`、从 subscriptions 移除、置 `bridge = undefined` |
 
 ---
@@ -365,13 +418,15 @@ Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**，而非
 |------|---------|-----|
 | 服务列表 | `globalState` | `services` |
 | API Keys | `Secret Storage` | `apiKeys.{serviceId}` |
-| Bridge 状态 | `globalState` | `aiQuotaDashboard.bridgeState` |
-| 刷新间隔 | `globalState` + Settings | `refreshInterval` / `aiQuotaDashboard.refreshInterval` (默认 600s) |
-| 预警阈值 | `globalState` + Settings | `warnThreshold` / `aiQuotaDashboard.warnThreshold` (默认 0.8) |
-| AFK 阈值 | `globalState` + Settings | `afkThreshold` / `aiQuotaDashboard.afkThreshold` (默认 3600s) |
+| Bridge 状态 | `globalState` | `aiQuotaDashboard.bridgeState`（connected / lastPushAt / receivedKinds / lastError） |
+| 迁移标记 | `globalState` | `aiQuotaDashboard.bridgeSecretsCleared`（bridge 凭证一次性迁移清理完成后写入） |
+| 迁移标记 | `globalState` | `aiQuotaDashboard.configMigrated`（globalState → Settings 一次性迁移完成后写入） |
+| 刷新间隔 | VSCode Settings（唯一可信源） | `aiQuotaDashboard.refreshInterval` (默认 600s) |
+| 预警阈值 | VSCode Settings（唯一可信源） | `aiQuotaDashboard.warnThreshold` (默认 0.8) |
+| AFK 阈值 | VSCode Settings（唯一可信源） | `aiQuotaDashboard.afkThreshold` (默认 3600s) |
 | 历史数据 | `globalState` | `aiQuotaDashboard.history` |
 
-**注意**：全局三项设置在写入 `globalState` 时会同步写入 VSCode Settings（`config.ts` 的 `setState()` 对这三项额外调用 `workspace.getConfiguration().update()`），读取时优先 `globalState`、无值时回退到 Settings。
+**注意**：全局三项设置以 VSCode Settings 为**唯一可信源**；读取时 Settings 无值则回退 `globalState` 旧值（历史版本双写残留），并在回退时触发一次性迁移把旧值搬入 Settings。防重复迁移采用双闸门：会话内存闸门（迁移失败自动重试）+ `aiQuotaDashboard.configMigrated` 持久标记（跨会话生效）。
 
 ---
 
@@ -426,22 +481,39 @@ Bridge 服务器**仅在用户添加了 Cookie Bridge 服务后启动**，而非
 
 ---
 
-## Webview 模板系统
+## Webview 前端架构（构建期编译）
 
-仪表盘采用「注册表 + 数据驱动」渲染模式：
+Webview 前端为**构建期编译的 TS 模块**（无 inline script、无字符串模板），整体链路：
 
-1. **模板注册**：每个服务在 `templateScript` 中向全局 `serviceTemplates` 注册 `renderCard` 函数
-2. **调度器**：`shared.ts` 中的 `renderService(data)` 根据 `data.kind` 分发到对应模板
-3. **无 fallback**：未注册 kind 显示错误提示，强制每个服务实现专属模板
-4. **设置页**：`settings.ts` 通过注入 `serviceSettingsMap` 元数据，无 kind 硬编码
+```
+src/webview/（TS 源码，类型安全）
+    ├── main.ts        # 入口：registerXxxCard() 显式注册卡片 + 消息循环 + 视图调度
+    ├── shared.ts      # 内置卡片注册表 + renderService(data) 分发 + vscodeApi 封装
+    ├── settings.ts    # 设置页渲染 + 事件绑定（数据驱动，无 kind 硬编码）
+    ├── types.ts       # 前端消息/视图类型定义
+    └── cards/*.ts     # 各服务卡片渲染模块（glm / kimi / mimo）
+        │
+        ▼ esbuild（npm run build，iife、es2020、不 minify）
+media/dashboard.js（IIFE 单文件 bundle）
+        │
+        ▼ webviewView.ts 经 asWebviewUri + nonce 外链注入
+Webview 运行（CSP: script-src 仅 ${webview.cspSource}，无 'unsafe-inline'）
+```
 
-```javascript
-// 模板注册示例（GLM）
-serviceTemplates.glm = {
-  renderCard: function(data) {
-    // 返回 HTML 字符串
-  }
-};
+**关键设计**：
+
+1. **显式注册**：卡片经 `main.ts` 顶部显式调用 `registerXxxCard()` 注册进 `shared.ts` 的内置注册表（模块作用域，类型安全）——`window.serviceTemplates` 全局注册表已废弃，早期 compat prelude（`vscode`/`escapeHtml`/`fmtNum`/`fmtDateTime` 全局暴露）已删除
+2. **单一分发**：`shared.ts` 的 `renderService(data)` 按 `data.kind` 从内置注册表分发；未注册 kind 显式报错（强制每个服务实现专属卡片）
+3. **无 inline script**：全部 JS 经 `media/dashboard.js` 外链加载；宿主侧仅保留 settings 元数据注入通道 `window.__AQD_SETTINGS_META__`（nonce 保护的 meta 直传，非代码）
+4. **消息协议不变**：Extension ↔ Webview 仍走 `postMessage`（见「Webview 通信协议」章），前端类型定义在 `src/webview/types.ts`
+
+```typescript
+// 卡片注册示例（src/webview/cards/glm.ts，main.ts 中 registerGlmCard() 启用）
+export function registerGlmCard() {
+  registerCard('glm', (data: WebviewServiceData) => {
+    // 返回 HTML 字符串（模块内 import 共享渲染工具，类型安全）
+  });
+}
 ```
 
 ---
@@ -460,7 +532,7 @@ serviceTemplates.glm = {
 
 ## 各服务仪表盘详情
 
-> Cookie Bridge 服务卡片**不在仪表盘显示**（仪表盘通过 `filter(p => p.kind !== 'bridge')` 过滤）。Bridge 的连接状态（连接徽章、最后同步时间、已连接服务标签、诊断信息）整合在「服务」标签页的 Bridge 服务条目内（`settings.ts` 的 `renderServiceItem` 的 `isBridgeService` 分支）。
+> Data Bridge 服务卡片**不在仪表盘显示**（仪表盘通过 `filter(p => p.kind !== 'bridge')` 过滤）。Bridge 的连接状态（连接徽章、最后同步时间、已接收数据种类标签、诊断信息）整合在「服务」标签页的 Bridge 服务条目内（`settings.ts` 的 `renderServiceItem` 的 `isBridgeService` 分支）。
 
 ### GLM 详情分析
 
@@ -473,22 +545,22 @@ GLM 仪表盘卡片包含多层结构：
    - 子 Tab：「当日」/「近7天」/「近30天」
    - 内容：SVG 平滑曲线图（二次贝塞尔）+ 汇总统计标签
 
-**懒加载机制**：首次只拉取当日数据，切换时间范围时通过 `requestDetailRange` 命令按需拉取并缓存。
+**懒加载机制**：首次只拉取当日数据，切换时间范围时通过 `requestDetailRange` 命令按需拉取并缓存。bridge 数据源（`dataSource='bridge'`）的 GLM 服务仅提供当日详情，近7天/近30天懒加载会被拦截并提示「该服务数据由 Data Bridge 推送，仅提供当日详情」。
 
 ### Kimi 详情分析
 
-Kimi 仪表盘卡片结构：
+Kimi 仪表盘卡片结构（VSCode 端，Code API 路径）：
 
-1. **头部**：用户自定义名称 + 会员等级徽章 / 刷新按钮 + 服务名 + 更新时间 + 会员有效期
-2. **配额区域**：3 个配额卡片垂直排列
-   - **频率限制明细**：基于 `limits` 数组第一个窗口限制（通常是 5 小时频限），含子限额详情
-   - **本周用量**：基于 `detail` 主配额
-   - **月度权益额度**：基于 `balances` 第一个余额项的 `amountUsedRatio`
-3. **Tooltip 信息**：会员等级、有效期、并行度约束（如 FEATURE_CODING: 20）
+1. **头部**：用户自定义名称 / 刷新按钮 + 服务名 + 更新时间
+2. **配额区域**：2 个配额卡片垂直排列
+   - **频率限制明细 (5h)**：基于 `limits` 数组精确匹配 5h 窗口（`duration === 300 && TIME_UNIT_MINUTE`，兜底取最短窗口），含子限额详情
+   - **本周用量**：基于 `usage` 主窗口（`usedPercent` 优先，缺失回退 `used/limit` 计算）
 
-Kimi 不涉及详情懒加载，所有数据在 `provider.ts` 中通过两个并行请求一次性拉取：
-- `GetSubscription`：会员等级、有效期、余额、并行度约束
-- `GetUsages`：频率限制明细、本周用量
+VSCode 端无订阅信息（`level` / 会员有效期 / 月度权益额度等字段留空，仅浏览器端网页 token relay 模式展示）。Kimi 不涉及详情懒加载，所有数据在 `provider.ts` 中通过单个请求拉取：
+
+- `GET https://api.kimi.com/coding/v1/usages`（Bearer `sk-` Key）：频率限制明细 + 本周用量
+
+> 浏览器扩展端为双模式：① 网页 token relay（主路径，3 槽全量，含月度权益额度）② Code API Key 手动配置（兜底，2 槽，字段映射与 VSCode 端一致）。
 
 ### MiMo 详情分析
 
@@ -504,12 +576,21 @@ MiMo 不涉及详情懒加载，所有数据在 provider 中一次性拉取（�
 ## 运行与开发
 
 ```bash
-npm run compile      # 编译 TypeScript
-npm run watch        # 监听模式开发
+# ---- VSCode 扩展（在 vscode/ 目录）----
+npm run compile      # tsc 纯类型检查（noEmit，不产出文件）
+npm run build        # esbuild 打包：extension → out/extension.js、webview → media/dashboard.js
+npm run watch        # esbuild 监听模式（extension/webview 两个 bundle 同时监听）
+npm run clean        # 清理 out/ 与 media/ 构建产物
 npm run lint         # ESLint 检查
 npm run test         # 运行 vitest 测试套件
 npm run test:watch   # 监听模式运行测试
+npm run build:browser # esbuild 打包浏览器扩展 background → build/staging/{chrome,firefox}/scripts/background.js
+
+# ---- 浏览器扩展（仓库根）----
+bash build.sh        # staging 组装 + 两平台 zip + VSIX 一键打包
 ```
+
+> F5 调试 VSCode 扩展前需先 `npm run build`（out/extension.js 与 media/dashboard.js 为 esbuild 产物，`compile` 不再产出）。日常开发用 `npm run watch` 自动重建。
 
 ### 环境要求
 
@@ -528,8 +609,10 @@ npm run test:watch   # 监听模式运行测试
 | `src/core/afk.test.ts` | AfkDetector 的活动检测逻辑 |
 | `src/core/format.test.ts` | fmtNum 数字格式化（K/M/B 缩写） |
 | `src/core/types.test.ts` | getColorLevel 颜色等级计算 |
+| `src/core/config.test.ts` | 配置管理（saveServiceAtomic 原子化、Settings 唯一可信源、一次性迁移双闸门） |
+| `src/bridge/server.test.ts` | Bridge 服务器安全校验（Host 白名单/401/415/413/1MB 上限） |
 | `src/services/glm/provider.test.ts` | GLM 数据解析逻辑 |
-| `src/services/kimi/provider.test.ts` | Kimi 数据解析逻辑（窗口限制、主配额、余额） |
+| `src/services/kimi/provider.test.ts` | Kimi 数据解析逻辑（Code API Key 判定、5h 窗口匹配、用量槽解析） |
 | `src/services/mimo/provider.test.ts` | MiMo 数据解析逻辑 |
 | `src/services/bridge/provider.test.ts` | Bridge 状态数据提供者 |
 | `src/storage/persistence.test.ts` | 历史数据加载、保存、合并、清理 |
@@ -555,10 +638,9 @@ npm run test:watch   # 监听模式运行测试
 
 ## 已知技术债务
 
-1. **配置未完全接入 VSCode Settings API** — `package.json` 声明了 `configuration` 属性，`config.ts` 的 `setState()` 对刷新间隔、预警阈值、AFK 阈值三项会同步写入 VSCode Settings，但**读取时仍优先 `globalState`**（仅当 `globalState` 无值时回退到 Settings）。理想应统一以 Settings 为唯一可信源。
-2. **Webview JS 为字符串拼接** — 模板函数返回内联 JS 字符串，无类型检查，维护成本高。可考虑构建时模板编译改善。
-
-> 注：早期版本中 `warnThreshold` 声明但未使用，现已实现 `checkQuotaWarnings()`（`extension.ts`），超阈值弹出 VSCode 警告通知（30 分钟冷却），不再属于技术债务。
+> 注 0：早期「Webview JS 为字符串拼接」的债务已解决（构建链落地）——Webview 前端源码迁移至 `src/webview/` TS 模块，经 esbuild 构建期编译为 `media/dashboard.js` IIFE bundle，具备完整类型检查。
+> 注 1：早期「配置未完全接入 VSCode Settings API」的债务已解决（1.1.1）——全局三项设置现以 Settings 为唯一可信源，`globalState` 旧值经一次性迁移（双闸门防重复）后仅作回退。
+> 注 2：早期版本中 `warnThreshold` 声明但未使用，现已实现 `checkQuotaWarnings()`（`extension.ts`），超阈值弹出 VSCode 警告通知（30 分钟冷却），不再属于技术债务。
 
 ---
 
@@ -579,7 +661,7 @@ npm run test:watch   # 监听模式运行测试
   1. 在 `src/services/` 创建新目录（结构参考 `glm/`、`kimi/` 或 `mimo/`）
   2. 实现 `QuotaProvider` 接口（`provider.ts`）
   3. 定义扩展数据类型（`types.ts`）
-  4. 编写仪表盘卡片模板（`template.ts`，需注册到 `serviceTemplates.{kind}`）
+  4. 编写 Webview 卡片渲染模块（`src/webview/cards/{kind}.ts`，导出 `registerXxxCard()`），并在 `src/webview/main.ts` 顶部显式调用注册
   5. 编写专属样式（`styles.ts`）
   6. 编写设置元数据（`settings.ts`）
   7. 可选：实现 `StatusBarRenderer` 接口（`statusBar.ts`），否则状态栏显示 `?`
@@ -588,7 +670,7 @@ npm run test:watch   # 监听模式运行测试
   10. 在 `src/services/registry.ts` 注册
 
 - **修改仪表盘样式**: 编辑对应服务的 `styles.ts`（通用样式在 `src/dashboard/styles.ts`）
-- **修改仪表盘渲染**: 编辑对应服务的 `template.ts`（共享逻辑在 `src/dashboard/templates/shared.ts`）
+- **修改仪表盘渲染**: 编辑对应服务的 `src/webview/cards/{kind}.ts`（注册表与分发逻辑在 `src/webview/shared.ts`）
 - **添加命令**: 在 `extension.ts` 注册命令，在 `package.json` `contributes.commands` 声明
 - **编写测试**: 在对应模块旁创建 `{source}.test.ts`，使用 vitest
 
@@ -639,10 +721,26 @@ Authorization: Bearer {API_KEY}
 
 ### Kimi Membership
 
+**VSCode 端用量统计（Code API，唯一路径）**
+```
+GET https://api.kimi.com/coding/v1/usages
+Authorization: Bearer {API_KEY}    # Kimi Code API Key（sk- 前缀，长期有效；国际站为 https://api.kimi.ai）
+```
+
+**响应结构示例**
+
+- `usage`: 每周主用量窗口（`usedPercent` / `used` / `limit` / `resetAt`）→ 「本周用量」槽位
+- `limits`: 频率限制窗口列表，精确匹配 `duration === 300 && TIME_UNIT_MINUTE`（5h）窗口，兜底取换算后最短窗口 → 「频率限制明细 (5h)」槽位
+- `resetAt` 兼容 ISO 字符串与 Unix 时间戳（秒/毫秒自动判别）
+
+**浏览器端网页接口（网页 token relay 模式）**
+
 **用量统计（频限 + 本周）**
 ```
 POST https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages
-Authorization: Bearer {JWT_TOKEN}
+Authorization: Bearer {access_token}
+User-Agent: {完整浏览器 UA}
+r-timezone: {IANA 时区，如 Asia/Shanghai}
 Content-Type: application/json
 connect-protocol-version: 1
 
@@ -652,21 +750,23 @@ connect-protocol-version: 1
 **会员等级与月权益**
 ```
 POST https://www.kimi.com/apiv2/kimi.gateway.membership.v2.MembershipService/GetSubscription
-Authorization: Bearer {JWT_TOKEN}
+Authorization: Bearer {access_token}
+User-Agent: {完整浏览器 UA}
+r-timezone: {IANA 时区，如 Asia/Shanghai}
 Content-Type: application/json
 connect-protocol-version: 1
 
 {}
 ```
 
-**响应结构示例**
+> 鉴权背景：2026 年 8~9 月 Kimi 废弃 `kimi-auth` Cookie（停止续期 + 签名密钥轮换），网页端改用 localStorage `access_token`（~15 分钟）/ `refresh_token`（~90 天）令牌对。浏览器扩展通过 content script（`kimi-content.js`）被动镜像 `access_token` 发起上述请求（**不调用** RefreshToken 端点，避免踢网页下线）；UA 与 Cookie 由浏览器 fetch 自动携带，仅需手动补 `r-timezone`。
 
-用量统计返回 `usages` 数组，每个 usage 包含：
-- `scope`: 功能标识（如 `FEATURE_CODING`）
-- `detail.limit`/`used`/`remaining`/`resetTime`: 配额详情
-- `limits`: 子限额列表（含 window.duration 和 window.timeUnit）
+**双端差异**：
 
-会员信息返回 `subscription`（套餐信息）、`balances`（权益余额列表，含 `amountUsedRatio` 使用率）、`capabilities`（功能并行度约束）。
+- VSCode 端：仅支持 Code API Key（`sk-` 前缀静态 Key，Kimi Code 控制台获取）。非 `sk-` 凭证（如网页 JWT）直接抛引导错误、不发起请求；Data Bridge 架构下浏览器扩展不再推送任何凭证，bridge 数据源的 Kimi 服务数据完全来自浏览器端网页 token relay 拉取后推送
+- 浏览器端：双模式——① 网页 token relay（主路径，3 槽全量，含月度权益额度）② Code API Key 手动配置（兜底，2 槽，字段映射与 VSCode 端一致：`usedPercent` 优先、`resetAt` 秒/毫秒/ISO 兼容、5h 窗口精确匹配）
+
+> 注意：`api/kimi.js` 与 `provider.ts` 为两份独立实现，修改任一端时需手动同步另一端（代码内已有注释互指，此处文档化）。
 
 ### Xiaomi MiMo Token Plan
 
@@ -695,7 +795,7 @@ Cookie: {COOKIE}
 
 ## 浏览器扩展架构
 
-浏览器扩展同时提供 **Cookie Bridge**（凭证转发）和 **仪表盘**（配额监控）两个功能。
+浏览器扩展同时提供 **Data Bridge**（配额数据推送）和 **仪表盘**（配额监控）两个功能。浏览器扩展**不再向 VSCode 推送任何凭证**（Cookie / API Key 均不推），改为浏览器端用自身凭证调 API 拉取配额数据，把配额数据推送给 VSCode 展示。
 
 ### 目录结构
 
@@ -703,26 +803,33 @@ Cookie: {COOKIE}
 
 ```
 browser-common/                # 共享代码（单一可信源）
-├── browser-api.js             # 浏览器 API 兼容层（预留）
 ├── cache.js                   # 基于 storage.local 的带 TTL 缓存（正常 60s / 错误 300s）
 ├── config.js                  # 集中式配置管理（loadConfig/saveConfig）
-├── constants.js               # 共享常量（BRIDGE_PROBE_SECRET 探测密钥）
-├── offscreen.html             # Offscreen 文档：双层凭证刷新（fetch → iframe 回退）
+├── shared-ui.js               # Popup/Dashboard 共享 UI 工厂（createSharedUI，页面差异经选项注入）
 ├── popup.html                 # Popup 仪表盘 HTML
-├── popup.js                   # Popup 主逻辑（仪表盘 + 设置 + 服务管理）
+├── popup.js                   # Popup 页面专属逻辑（主体由 shared-ui.js 承载）
 ├── dashboard.html             # 独立仪表盘页面 HTML
-├── dashboard.js               # 独立仪表盘逻辑
+├── dashboard.js               # 独立仪表盘页面专属逻辑（同上）
 ├── styles.css                 # 共享样式表
 ├── templates.js               # 卡片渲染模板（GLM/Kimi/MiMo + SVG 图表 + Tab 切换）
 ├── api/
 │   ├── glm.js                 # GLM API 客户端（Bearer Token 认证）
-│   ├── kimi.js                # Kimi API 客户端（kimi-auth Cookie 值作 Bearer Token 认证）
+│   ├── kimi.js                # Kimi API 客户端（双模式：网页 token relay 主路径 / Code API Key 兜底）
 │   └── mimo.js                # MiMo API 客户端（Cookie 认证）
+├── protocol/                  # Data Bridge 协议共享层（双端单一可信源：常量/消息/DataPayload 构造与校验；popup/dashboard 运行时 import，background 侧经打包内联）
 └── scripts/
-    └── background.js          # Service Worker（Cookie Bridge + 凭证检测 + 自动刷新）
+    ├── background.js          # Service Worker 瘦入口（init 流程 + 事件监听注册 + 编排调用）
+    ├── lib/                   # background 子模块（发布态经 esbuild 内联进 IIFE bundle，不进 zip）
+    │   ├── config-sync.js     # 监控目标 / 显示名称 / 刷新间隔配置（live binding 共享状态）
+    │   ├── bridge-client.js   # Bridge 端口发现 / 推送 / 重试队列 / 互斥锁
+    │   ├── cookie-utils.js    # Cookie 多策略读取 / JWT 挑选 / 凭证 TTL（纯工具层）
+    │   ├── credential.js      # 凭证缓存 / TTL / 失效探测 / 后台标签页刷新
+    │   ├── kimi-relay.js      # Kimi access_token 被动镜像
+    │   └── relay.js           # 配额数据采集（gatherAllQuotaData，复用 api/ 各 fetcher）/ 推送 / 防抖与频率限制
+    └── kimi-content.js        # Kimi content script（镜像 kimi.com localStorage 令牌；classic 注入不参与打包）
 
 chrome/                         # Chrome/Edge 专属文件
-├── manifest.json               # Manifest V3（service_worker 模式 + offscreen 权限）
+├── manifest.json               # Manifest V3（service_worker 模式 + content_scripts）
 └── icons/
     ├── icon16.png
     ├── icon48.png
@@ -738,50 +845,52 @@ firefox/                        # Firefox 专属文件
 
 ### 构建流程（build.sh）
 
-`build.sh` 采用「复制 → 打包 → 清理」策略：
+`build.sh` 采用 **staging 架构**（源码树与打包目录自然隔离，无清理段），版本号唯一可信源为 `vscode/package.json`：
 
-1. 将 `browser-common/*` 完整复制到 `chrome/` 和 `firefox/`
-2. 分别打 zip 包：`ai-quota-dashboard-chrome-v1.1.0.zip` / `ai-quota-dashboard-firefox-v1.1.0.zip`
-3. 清理阶段：从 `chrome/` 和 `firefox/` 中删除复制进来的文件，仅保留 `manifest.json` 和 `icons/`
-4. 打包 VSCode 扩展（`vsce package`）
+1. `VERSION` 从 `vscode/package.json` 读取（消除多处手工同步版本号）
+2. 组装 staging：`build/staging/{chrome,firefox}/` = 平台 `manifest.json` + `icons/` + rsync(`browser-common/` 全部，排除 manifest/icons 仅作防御，不可用时回退 cp)
+3. `npm --prefix vscode run build:browser`：esbuild 将 background 入口（瘦入口 + `scripts/lib/` + `protocol/`）打包为 IIFE 单文件，覆盖 staging 内的 `scripts/background.js`（不 minify，便于发布包审查）
+4. 改写 staging manifest 的 version 后从 staging 打 zip（源码树 `chrome/`、`firefox/` 全程零接触）；zip 为显式清单制：`scripts/` 展开为 `background.js`（IIFE bundle）+ `kimi-content.js`，`scripts/lib/` 已内联不进包，`protocol/` 因 popup/dashboard 运行时 import 保留进包
+5. 产出 `ai-quota-dashboard-chrome-v{VERSION}.zip` / `ai-quota-dashboard-firefox-v{VERSION}.zip`
+6. 打包 VSCode 扩展（`vsce package`，内部触发 `vscode:prepublish = clean && compile && build`）
+
+开发态零影响：源码树 manifest 仍指向 ESM 源码（`scripts/background.js` 直载 `scripts/lib/*` 与 `protocol/`，两浏览器 `type: module` 均支持），unpacked 调试路径不变；CI（`ci.yml` browser job）跑同一 `build.sh` 并以 `unzip -l` 断言 `scripts/background.js` 与 `protocol/index.js` 在包内。
 
 ### 共享模块
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| 浏览器 API 兼容层 | `browser-api.js` | 统一 `chrome.*` / `browser.*` API 差异（当前为预留层） |
+| 共享 UI 工厂 | `shared-ui.js` | `createSharedUI(options)` 承载 Popup/Dashboard 共享页面逻辑，页面差异（Bridge 状态卡、自动刷新开关、空态文案等 13 项）经选项注入 |
 | 缓存 | `cache.js` | 基于 `chrome.storage.local` 的带 TTL 缓存（正常 60s / 错误 300s） |
 | 配置管理 | `config.js` | 集中式 `loadConfig()` / `saveConfig()` |
-| 共享常量 | `constants.js` | `BRIDGE_PROBE_SECRET` 探测密钥（访问 `/health` 的第一层门槛） |
-| Popup 主逻辑 | `popup.js` | 仪表盘弹窗 + 设置管理，导入 config.js 和 cache.js |
+| Popup 页面逻辑 | `popup.js` | Bridge 状态检测、服务管理（添加/删除/开站开关）等页面专属逻辑 |
 | 卡片模板 | `templates.js` | GLM / Kimi / MiMo 配额卡片和 SVG 图表模板 |
 | 样式表 | `styles.css` | Popup 和卡片样式 |
 
-### Cookie Bridge 推送机制
+### Data Bridge 推送机制
 
-**核心逻辑**：浏览器扩展作为统一凭证推送端，总是将所有目标站点的 Cookie/API Key 推送给 VSCode。VSCode 端收到后会自动分发到对应的 AI 服务（GLM/Kimi/MiMo），写入 Secret Storage 并更新 `dataSource='bridge'`，无需手动配置。
+**核心逻辑**：浏览器扩展作为统一配额数据推送端，用自身凭证（Kimi 网页令牌 / MiMo Cookie / GLM API Key）调 API 拉取配额数据，把**配额数据**（而非凭证）推送给 VSCode。VSCode 端收到后会自动创建/更新对应的 AI 服务（标记 `dataSource='bridge'`），无需手动配置。**不再传输任何凭证**。
 
 1. `popup.js` 维护 `config.services` 列表，保存在 `chrome.storage.local`（key: `dashboardConfig`）
-2. `background.js` 启动后总是尝试发现 VSCode Bridge 端口并推送全部凭证
-3. `chrome.cookies.onChanged` 监听所有目标站点 Cookie（kimi.com / xiaomimimo.com）变化
-4. Cookie 变化或 GLM API Key 变化时，通过防抖推送给 VSCode
-5. 添加/删除服务时，popup 发送 `configUpdated` 消息通知 background 重新推送
+2. `background.js` 启动后总是尝试发现 VSCode Bridge 端口并推送配额数据
+3. `chrome.cookies.onChanged` 不再触发推送（凭证仅浏览器端自用），但保留 `cookieChanged` 广播用于单服务刷新
+4. 添加/删除服务或配置变更时，popup 发送 `configUpdated` 消息通知 background 重新推送
+5. 浏览器自身拉数依赖有效 Cookie，凭证失效检测 + 自动刷新机制保留（见下节）
 
 ```
 浏览器扩展启动
     │
     ├─ discoverPort() → 扫描 37100..37110，连接 VSCode Bridge
-    ├─ relayCookies(true) → 采集全部凭证
-    │     ├─ gatherAllCookies() → kimi-auth / MiMo Cookie
-    │     ├─ gatherAllStorageCredentials() → GLM API Key
-    │     └─ POST /cookies → VSCode Bridge
+    ├─ relayData(true) → 采集全部配额数据
+    │     ├─ gatherAllQuotaData() → 复用 api/{glm,kimi,mimo}.js fetcher，用自身凭证调 API
+    │     └─ POST /data → VSCode Bridge（DataPayload）
     │
     ├─ VSCode Bridge 更新 Bridge 服务状态
-    ├─ VSCode 分发凭证到对应 AI 服务（Secret Storage + dataSource='bridge'）
-    └─ 清除缓存 + 触发 pullAll() 刷新所有服务数据
+    ├─ VSCode 自动创建/更新对应 AI 服务（dataSource='bridge'，无需凭证）
+    └─ 热重载 updateView() 刷新所有服务卡片（不中断）
 ```
 
-### Cookie Bridge 端口发现
+### Data Bridge 端口发现
 
 VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现端口：
 
@@ -791,7 +900,7 @@ VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现
 
 ### 凭证失效检测 + 自动刷新
 
-**检测机制**（每 30 分钟执行一次）：
+**检测机制**（随刷新间隔执行，下限每 5 分钟）：
 
 1. **Cookie 存在性检查**：`chrome.cookies.get()` 确认 Cookie 存在
 2. **过期时间检查**：非 session cookie 检查 `expirationDate`
@@ -801,45 +910,30 @@ VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现
    - MiMo：`GET https://platform.xiaomimimo.com/api/v1/tokenPlan/detail`（Cookie 认证）
    - 返回 401/403 或业务码非 0 = 凭证失效
 
-**自动刷新机制（三层降级策略）**：
+**自动刷新机制（后台标签页单路径）**：
 
-凭证刷新完全对用户不可见（无窗口弹出、无任务栏图标），采用三层降级：
+凭证刷新采用 `loadCredentialViaBackgroundTab(kind)` 单一路径（Cookie 类凭证 Kimi/MiMo 共用；GLM 为 storage 类静态 API Key，无刷新载体直接跳过）。原 Offscreen API 双层刷新（`loadViaOffscreen`）与最小化弹出窗口降级（`loadViaMinimizedWindow`）方案已于 1.1.1 随 `offscreen.html` 一并移除：
 
-1. **Offscreen API（Chrome 116+）**：首选方案
-   - `chrome.offscreen.createDocument({ url: 'offscreen.html', reasons: ['IFRAME_SCRIPTING'] })`
-   - Offscreen 文档内执行**双层刷新**：
-     - **第一层（fetch）**：先 `fetch(url)` 请求目标网站，快速触发服务端 Set-Cookie（无需渲染页面）
-     - **第二层（iframe 回退）**：若 fetch 后 Cookie 未变化，创建隐藏 `<iframe src={url}>` 让页面 JS 完整执行（覆盖 JS 设置的 Cookie 场景）
-   - 完成后 `chrome.offscreen.closeDocument()` 清理资源
-
-2. **最小化弹出窗口（Firefox / Chrome <116 降级）**：
-   - `chrome.windows.create({ type: 'popup', focused: false, state: 'minimized', url })`
-   - 窗口最小化到任务栏，用户不可见
-   - 等待 `chrome.tabs.onUpdated` → `status: 'complete'` + 额外 2 秒延迟
-   - 关闭窗口
-
-3. **刷新后验证**：
-   - 重新检测 Cookie 是否更新
-   - 成功后自动 `relayCookies(true)` 推送给 VSCode
+1. `chrome.tabs.create({ active: false, url })` 创建后台非激活标签页访问目标站点，触发 session cookie 生成（携带用户 same-site 登录态）
+2. 等待页面加载完成后关闭标签页
+3. **刷新后验证**：重新检测 Cookie 是否更新，成功后自动 `relayData(true)` 重新推送配额数据
 
 ```
-检测到凭证失效
+检测到凭证失效（Cookie 类：Kimi / MiMo）
     │
-    ├─ Chrome 116+ ?
-    │   ├─ Yes → loadViaOffscreen(url, cookieUrl, cookieNames)
-    │   │         ├─ fetch(url) → 检查 Cookie 是否变化
-    │   │         └─ 未变化 → 创建 iframe → 等待加载 → 再检查
-    │   └─ No  → loadViaMinimizedWindow(url)
-    │             └─ 创建最小化 popup 窗口 → 等待加载 → 关闭
+    ├─ 自动刷新开关开启 ?
+    │   ├─ No  → 跳过（日志提示）
+    │   └─ Yes → loadCredentialViaBackgroundTab(kind)
+    │             └─ 创建后台非激活标签页 → 等待加载 → 关闭
     │
-    └─ 验证刷新结果 → relayCookies(true) → 推送给 VSCode
+    └─ 验证刷新结果 → relayData(true) → 推送配额数据给 VSCode
 ```
 
 ### 消息协议（Popup ↔ Background）
 
 | 消息方向 | action | 说明 |
 |---------|--------|------|
-| Popup → Background | `relayNow` | 手动触发推送全部凭证到 VSCode |
+| Popup → Background | `relayNow` | 手动触发推送全部配额数据到 VSCode |
 | Popup → Background | `getStatus` | 获取 Bridge 连接状态 + 诊断信息 |
 | Popup → Background | `configUpdated` | 配置变更通知（添加/删除/保存服务后发送） |
 | Popup → Background | `checkCredentials` | 手动触发凭证检测 + 自动刷新 |
@@ -850,16 +944,16 @@ VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现
 {
   connected: boolean,      // 是否已连接 VSCode Bridge
   port: number | null,     // 当前活跃端口
-  activeKinds: string[],   // 当前活跃的服务类型列表（保留字段）
+  receivedKinds: string[],   // 已接收配额数据的服务种类列表
   lastError: string | null, // 最后连接/推送失败的诊断信息
 }
 ```
 
-### Cookie 变化即时刷新
+### Cookie 变化即时刷新（浏览器端单服务刷新）
 
 当 Background 检测到目标站点 Cookie 发生变化时，自动广播 `cookieChanged` 消息给所有已打开的 Popup/Dashboard 页面：
 
-1. **触发源**：`chrome.cookies.onChanged` 监听器（处理所有目标站点 Cookie）
+1. **触发源**：`chrome.cookies.onChanged` 监听器（处理所有目标站点 Cookie）；Cookie 变化**不再触发 Data Bridge 推送**（凭证仅浏览器端自用），仅广播消息触发浏览器端单服务刷新
 2. **消息格式**：`{ action: 'cookieChanged', kind: 'kimi' }`
 3. **响应逻辑**：Popup/Dashboard 收到消息后，经 2 秒防抖后调用 `refreshSingleService(kind)` 仅刷新受影响的服务卡片
 4. **错误数据缓存**：缓存写入时区分正常/错误数据，错误数据 TTL 为 300 秒（正常 60 秒），避免频繁重试失败请求
@@ -873,7 +967,7 @@ VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现
     {
       id: 'bridge-1714000000000',  // {kind}-{timestamp}
       kind: 'bridge',              // 'bridge' | 'glm' | 'kimi' | 'mimo'
-      name: 'Cookie Bridge',       // 显示名称
+      name: 'Data Bridge',         // 显示名称
       enabled: true,
     },
     // ...
@@ -886,24 +980,26 @@ VSCode Bridge 服务器启动时通过以下机制让浏览器扩展自动发现
 }
 ```
 
-### Cookie Bridge 推送数据格式
+### Data Bridge 推送数据格式
 
 ```javascript
-// POST http://127.0.0.1:{port}/cookies
+// POST http://127.0.0.1:{port}/data（需携带 X-Auth-Token 头）
 {
-  source: 'ai-quota-cookie-bridge',
+  source: 'ai-quota-data-bridge',
   timestamp: number,
-  cookies: [
-    { service: 'kimi', name: 'kimi-auth', value: '...', domain: '.kimi.com', path: '/' },
-    { service: 'mimo', name: 'api-platform_serviceToken', value: '...', domain: '.xiaomimimo.com', path: '/' },
-    { service: 'mimo', name: 'userId', value: '...', domain: '.xiaomimimo.com', path: '/' },
+  data: [
+    {
+      kind: 'glm',                 // 'glm' | 'kimi' | 'mimo'
+      serviceData: { ... },        // 该服务的 ServiceData + 扩展字段（GLM: GlmServiceData；Kimi: KimiServiceData；MiMo: MimoServiceData）
+    },
+    // ...
   ],
-  kimiAuthToken: '...',         // kimi-auth Cookie 值（方便 VSCode 直接用作 Bearer Token）
-  mimoCookie: 'name1=val1; name2=val2',  // MiMo Cookie 组合字符串
-  glmApiKey: '...',             // GLM API Key（浏览器扩展推送的 API Key）
-  activeKinds: ['kimi', 'mimo', 'glm'],  // 浏览器扩展当前活跃的服务类型，VSCode 据此同步移除已删除服务
+  activeKinds: ['glm', 'kimi', 'mimo'],  // 浏览器扩展当前活跃的服务类型，VSCode 据此同步移除已删除服务
+  displayNames: { glm: '我的 GLM', kimi: 'Kimi 会员' },  // 各服务自定义显示名称（可选）
 }
 ```
+
+> 注意：payload 中**不含任何凭证**（Cookie / API Key 均不推送）。浏览器端用自身凭证调 API 拉取配额，`serviceData` 即各服务的完整配额数据（含 slots、history、扩展字段）。
 
 ### Popup 仪表盘功能
 
@@ -915,7 +1011,7 @@ Popup 打开后直接显示仪表盘（420px 宽弹窗），采用**三个平级
   - MiMo：套餐用量 + 补偿 Token + 有效期 + 自动续费状态
 - **服务 Tab**：
   - 服务管理：添加/删除/保存服务
-  - Cookie Bridge 状态：全局连接状态和诊断信息（位于服务列表顶部）
+  - Data Bridge 状态：全局连接状态和诊断信息（位于服务列表顶部）
 - **设置 Tab**：
   - 全局设置：刷新间隔、预警阈值
   - 数据管理：清除缓存
@@ -927,23 +1023,23 @@ Popup 打开后直接显示仪表盘（420px 宽弹窗），采用**三个平级
 ├── 功能 1：仪表盘（独立工作）
 │   └── Popup 中直接调用 API 查看配额，不依赖 VSCode
 │
-└── 功能 2：Cookie Bridge（需要 VSCode 扩展）
-    ├── 将浏览器凭证（Kimi/MiMo Cookie / GLM API Key）转发给 VSCode
-    └── VSCode 端自动分发凭证到对应的 AI 服务，并展示连接状态和已接收凭证种类
+└── 功能 2：Data Bridge（需要 VSCode 扩展）
+    ├── 浏览器端用自身凭证（Kimi 网页令牌 / MiMo Cookie / GLM API Key）调 API 拉取配额数据
+    └── 将配额数据（而非凭证）推送给 VSCode；VSCode 端自动创建/更新对应的 AI 服务，并展示连接状态和已接收数据种类
 ```
 
 ### Chrome 与 Firefox 的差异
 
 | 差异点 | Chrome | Firefox |
 |--------|--------|---------|
-| Manifest | 标准 V3 + `offscreen` 权限 | V3 + `browser_specific_settings.gecko` |
+| Manifest | 标准 V3（permissions + content_scripts） | V3 + `browser_specific_settings.gecko` |
 | Background | `service_worker` | `scripts`（数组） |
 | 扩展 ID | 自动生成 | 需在 manifest 中显式声明 |
 | Cookie API | `chrome.cookies` | `chrome.cookies`（Firefox 内置兼容） |
-| 凭证刷新 | Offscreen API（fetch → iframe 双层策略） | 最小化弹出窗口降级方案 |
+| 凭证刷新 | 后台标签页（`loadCredentialViaBackgroundTab`，两端一致） | 同左 |
 | 持久性 | Service Worker 非持久 | 事件页面 |
 | 最小版本 | Chrome 116+ | Firefox 116+ |
 
 ---
 
-*最后更新: 2026-06-15*
+*最后更新: 2026-09-04*

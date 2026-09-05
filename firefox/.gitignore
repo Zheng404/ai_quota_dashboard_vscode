@@ -1,0 +1,8 @@
+# Firefox 扩展目录白名单：
+# 本目录只应包含 manifest.json 与 icons/。browser-common/ 为单一可信源，
+# build.sh 构建时临时复制共享代码至此；构建中断（set -e）残留的文件
+# 不应入库，由本白名单拦截。新增 Firefox 专属文件时需在下加否定规则。
+/*
+!manifest.json
+!icons/
+!.gitignore

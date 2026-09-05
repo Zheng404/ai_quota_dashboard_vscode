@@ -14,14 +14,14 @@ describe('bridge provider', () => {
 		setBridgeExtensionContext(mockCtx);
 		await updateBridgeState({
 			connected: true,
-			receivedCredentials: ['kimi', 'mimo'],
+			receivedKinds: ['kimi', 'mimo'],
 			lastPushAt: 1718000000000,
 		});
 
 		const data = await bridgeProvider.fetch('') as BridgeServiceData;
 		expect(data.kind).toBe('bridge');
 		expect(data.connected).toBe(true);
-		expect(data.receivedCredentials).toEqual(['kimi', 'mimo']);
+		expect(data.receivedKinds).toEqual(['kimi', 'mimo']);
 		expect(data.lastPushAt).toBe(1718000000000);
 		expect(data.slots).toEqual([]);
 	});
@@ -29,7 +29,7 @@ describe('bridge provider', () => {
 	it('should return default state when no state set', async () => {
 		await updateBridgeState({
 			connected: false,
-			receivedCredentials: [],
+			receivedKinds: [],
 			lastPushAt: undefined,
 			lastError: undefined,
 		});
@@ -37,6 +37,6 @@ describe('bridge provider', () => {
 		const data = await bridgeProvider.fetch('') as BridgeServiceData;
 		expect(data.kind).toBe('bridge');
 		expect(data.connected).toBe(false);
-		expect(data.receivedCredentials).toEqual([]);
+		expect(data.receivedKinds).toEqual([]);
 	});
 });

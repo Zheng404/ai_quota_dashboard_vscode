@@ -42,8 +42,6 @@ export interface ServiceDescriptor {
 	badgeCssClass: string;
 	/** 数据提供者 */
 	provider: QuotaProvider;
-	/** 仪表盘卡片模板 JS 字符串 */
-	templateScript: string;
 	/** 服务特定 CSS */
 	styles: string;
 	/** 设置表单元数据 */

@@ -41,6 +41,12 @@ jobs:
       - name: Compile
         run: npm run compile
 
+      - name: Build bundles
+        run: npm run build
+
+      - name: Assert extension bundle
+        run: test -f out/extension.js
+
       - name: Test
         run: npm test
 
@@ -94,6 +100,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode/package-lock.json
+
+      - name: Install dependencies (esbuild)
+        run: npm --prefix vscode ci
+
       - name: Validate Chrome manifest
         run: |
           python3 -c "import json; json.load(open('chrome/manifest.json')); print('Chrome manifest valid')"
@@ -102,33 +118,42 @@ jobs:
         run: |
           python3 -c "import json; json.load(open('firefox/manifest.json')); print('Firefox manifest valid')"
 
-      - name: Package Chrome extension
-        run: |
-          cd chrome
-          zip -r ../ai-quota-cookie-bridge-chrome-${{ github.sha }}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
+      # 打包走 build.sh staging 流程（rsync 共享代码 + esbuild IIFE bundle 覆盖
+      # background.js + 改写 staging manifest version + 从 staging 打 zip）
+      - name: Package browser extensions
+        run: bash build.sh
 
-      - name: Package Firefox extension
+      # 断言：bundle 化的 background.js 与 protocol 共享层必须进包
+      # （background 为 IIFE 单文件；protocol/ 因 popup/dashboard 运行时 import 也须在包）
+      - name: Assert packaged artifacts
         run: |
-          cd firefox
-          zip -r ../ai-quota-cookie-bridge-firefox-${{ github.sha }}.zip manifest.json api/ scripts/ popup.html dashboard.html dashboard.js icons/
+          for browser in chrome firefox; do
+            zip_file="build/ai-quota-dashboard-${browser}-v$(node -p "require('./vscode/package.json').version").zip"
+            echo "校验 ${zip_file}..."
+            unzip -l "$zip_file" | grep -q 'scripts/background.js' \
+              || { echo "FAIL: scripts/background.js 不在 ${browser} 包内"; exit 1; }
+            unzip -l "$zip_file" | grep -q 'protocol/index.js' \
+              || { echo "FAIL: protocol/index.js 不在 ${browser} 包内"; exit 1; }
+            echo "PASS: ${browser} 包含 scripts/background.js 与 protocol/index.js"
+          done
 
       - name: Upload Chrome artifact
         uses: actions/upload-artifact@v4
         with:
           name: browser-extension-chrome-${{ github.sha }}
-          path: ai-quota-cookie-bridge-chrome-${{ github.sha }}.zip
+          path: build/ai-quota-dashboard-chrome-*.zip
           retention-days: 7
 
       - name: Upload Firefox artifact
         uses: actions/upload-artifact@v4
         with:
           name: browser-extension-firefox-${{ github.sha }}
-          path: ai-quota-cookie-bridge-firefox-${{ github.sha }}.zip
+          path: build/ai-quota-dashboard-firefox-*.zip
           retention-days: 7
 
       - name: Build summary
         run: |
           echo "##  Browser Extension Build Complete!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Chrome**: ai-quota-cookie-bridge-chrome-${{ github.sha }}.zip" >> $GITHUB_STEP_SUMMARY
-          echo "- **Firefox**: ai-quota-cookie-bridge-firefox-${{ github.sha }}.zip" >> $GITHUB_STEP_SUMMARY
+          echo "- **Chrome**: ai-quota-dashboard-chrome (staging + esbuild IIFE)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Firefox**: ai-quota-dashboard-firefox (staging + esbuild IIFE)" >> $GITHUB_STEP_SUMMARY

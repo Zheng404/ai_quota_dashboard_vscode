@@ -1,6 +1,5 @@
 import { ServiceDescriptor } from '../types';
 import { kimiProvider } from './provider';
-import { getKimiTemplate } from './template';
 import { KIMI_STYLES } from './styles';
 import { KIMI_SETTINGS } from './settings';
 import { kimiStatusBarRenderer } from './statusBar';
@@ -12,10 +11,10 @@ export const kimiDescriptor: ServiceDescriptor = {
 	badgeLabel: 'Kimi',
 	badgeCssClass: 'badge-kimi',
 	provider: kimiProvider,
-	templateScript: getKimiTemplate(),
+	// 卡片模板已迁 src/webview/cards/kimi.ts（构建期打包进 media/dashboard.js）
 	styles: KIMI_STYLES,
 	settings: KIMI_SETTINGS,
 	statusBarRenderer: kimiStatusBarRenderer,
 	helpCommand: 'showKimiHelp',
-	helpMessage: 'Kimi Token 获取方式：浏览器 F12 → Application → Cookies → kimi.com → 复制 kimi-auth 的值',
+	helpMessage: 'Kimi Code API Key 获取方式：访问 Kimi Code 控制台 → 创建并复制 API Key（sk- 开头）→ 粘贴到上方输入框',
 };

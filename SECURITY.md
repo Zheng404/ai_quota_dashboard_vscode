@@ -5,7 +5,7 @@
 本扩展采用**纯本地架构**，所有数据处理和存储均在用户本地机器完成：
 
 - **无云端上传**：配额数据、API Key、Cookie 等敏感信息绝不传输至任何外部服务器
-- **本地 HTTP 服务器**：Cookie Bridge 仅在 `127.0.0.1` 监听，用于浏览器扩展与 VSCode 之间的本地通信
+- **本地 HTTP 服务器**：Data Bridge 仅在 `127.0.0.1` 监听，用于浏览器扩展向 VSCode 推送配额数据的本地通信
 - **无遥测**：不收集用户使用数据、错误报告或分析信息
 - **无第三方依赖风险**：核心功能不依赖外部云服务或 SaaS 平台
 
@@ -16,21 +16,23 @@
 - 所有 API Key、JWT Token、Cookie 均存储在 **VSCode Secret Storage** 中
 - Secret Storage 由 VSCode 底层使用操作系统级密钥链（Keychain/Keyring）加密保护
 - 扩展代码只能通过 `ExtensionContext.secrets.get()` 读取，无直接文件系统访问
-- 无论凭证来自用户手动输入（`dataSource='manual'`）还是浏览器扩展推送（`dataSource='bridge'`），存储方式一致
+- 凭证仅存储于手动配置的服务（`dataSource='manual'`）；Data Bridge 架构下 bridge 数据源服务**不需要也不存储任何 Secret 凭证**（历史遗留凭证由一次性迁移 `migrateBridgeCredentials()` 清理）
 
-### Cookie 传输（Cookie Bridge）
+### 数据传输（Data Bridge）
 
-浏览器扩展与 VSCode 之间的凭证同步采用以下安全措施。Kimi/MiMo 的 Cookie 和 GLM API Key 都会通过 Bridge 转发至 VSCode，并由 VSCode 自动分发到对应的 AI 服务（Bridge 服务器仅在用户添加了 Cookie Bridge 服务后启动，详见按需启停）：
+浏览器扩展与 VSCode 之间的配额数据同步采用以下安全措施。**Data Bridge 不再传输任何凭证**：浏览器扩展用自身凭证（Kimi 网页令牌 / MiMo Cookie / GLM API Key）在浏览器端调 API 拉取配额数据，HTTP body 仅包含配额数据（`POST /data`，payload 为 `{source, timestamp, data: [{kind, serviceData}], activeKinds, displayNames}`）。Bridge 服务器仅在用户添加了 Data Bridge 服务后启动，详见按需启停：
 
 1. **本地仅限**：HTTP 服务器绑定 `127.0.0.1`，拒绝任何外部网络连接
-2. **双层 Token 认证**：
-   - **探测密钥**（`BRIDGE_PROBE_SECRET`）：打包进扩展的固定密钥，浏览器扩展访问 `/health` 时必须在 `X-Bridge-Probe` 头携带此密钥，通过后才返回会话 authToken。本地其它进程不知道此密钥，无法获取 token 伪造推送
+2. **Host 头白名单校验**：仅放行 `127.0.0.1:<port>` / `localhost:<port>` 形态的 Host 头，拦截恶意网页将自有域名解析到本机地址后发起的 DNS rebinding 攻击
+3. **双层 Token 认证**：
+   - **探测密钥**（`BRIDGE_PROBE_SECRET`）：打包进扩展的固定密钥，浏览器扩展访问 `/health` 时必须在 `X-Bridge-Probe` 头携带此密钥，通过后才返回会话 authToken。该密钥是纵深防御的第一层门槛（防其它来源误连、辅助防 CSRF）；由于密钥随扩展公开发布，**不防御本地恶意进程**——任何本地进程都可以访问 `/health` 获取 authToken（详见下方「已知限制」）
    - **会话 authToken**：每次 VSCode 启动生成随机 `authToken`（32 字节随机十六进制串），浏览器扩展通过 `/health` 获取，推送数据时必须携带 `X-Auth-Token` 头
-3. **CORS 收紧**：仅放行 `chrome-extension://` 和 `moz-extension://` 来源
-4. **敏感字段过滤**：推送前自动移除 `httpOnly`、`secure`、`expirationDate` 等浏览器元数据，仅发送必要的 `name` 和 `value`
-5. **请求大小限制**：POST 请求体限制 1MB，防止 DoS 攻击
-6. **请求超时**：所有 POST 请求 5 秒超时，防止挂起连接
-7. **防抖机制**：Cookie 变化后延迟推送（默认 1.5s），避免频繁请求
+4. **CORS 收紧**：仅放行 `chrome-extension://` 和 `moz-extension://` 来源
+5. **Content-Type 校验**：`/data` 端点仅接受 `application/json` 请求体（容忍 `; charset=` 后缀），非 JSON 请求返回 415；配合 CORS 预检堵住跨源 HTML 表单（`text/plain` 等表单默认编码）发起的 CSRF
+6. **凭证不出浏览器**：Cookie / API Key 等凭证仅由浏览器扩展自身用于调 API，绝不进入推送 payload；bridge 数据源的 AI 服务在 VSCode 端也不需要、不存储任何 Secret 凭证（历史遗留凭证由一次性迁移 `migrateBridgeCredentials()` 清理）
+7. **请求大小限制**：POST 请求体限制 1MB，防止 DoS 攻击
+8. **请求超时**：所有 POST 请求 5 秒超时，防止挂起连接
+9. **防抖机制**：配额数据采集后经防抖推送（默认 1.5s），避免频繁请求
 
 ### 端口文件与端口发现
 
@@ -47,13 +49,16 @@
 
 ## 已知限制
 
-### Cookie Bridge 认证机制说明
+### Data Bridge 认证机制说明
 
-Cookie Bridge 采用**双层 Token 认证**保护 `/health` 和 `/cookies` 端点：
+Data Bridge 采用**双层 Token 认证**保护 `/health` 和 `/data` 端点。其防御目标是**恶意网页与其它浏览器扩展**（CSRF / 跨源访问 / DNS rebinding），**不防御本地恶意进程**——本地回环信任模型需要用户知悉：
 
-- **第一层（探测密钥）**：`/health` 端点要求请求头携带打包进扩展的 `BRIDGE_PROBE_SECRET`，本地其它进程不知道此密钥，无法获取会话 authToken
-- **第二层（会话 authToken）**：`/cookies` 端点要求请求头携带 `X-Auth-Token`，值为 VSCode 启动时随机生成的 32 字节 token
-- **兼容性**：探测密钥打包在扩展中，理论上可被逆向提取。它是纵深防御的第一层门槛，真正的会话级认证仍依赖随机生成的 authToken（每次 VSCode 重启重新生成，生命周期仅限当前会话）
+- **威胁模型（Data Bridge 架构）**：推送内容为**配额数据而非凭证**（凭证不出浏览器），攻击面从「凭证泄露」降为「配额数据伪造」与「本机端口占用/探测」：
+  - 即使本地恶意进程绕过双层认证向 `/data` 推送伪造数据，其后果限于**仪表盘/状态栏展示错误的配额数值**，无法窃取或滥用任何 AI 服务凭证
+  - 伪造的 `history` 数据会与本地历史按日期去重合并，污染程度有限；`clearHistory` 命令可清除
+- **第一层（探测密钥）**：`/health` 端点要求请求头携带打包进扩展的 `BRIDGE_PROBE_SECRET`。该密钥随扩展公开发布、可被逆向提取，任何本地进程都可以访问 `/health` 获取会话 authToken，进而伪造配额数据推送
+- **第二层（会话 authToken）**：`/data` 端点要求请求头携带 `X-Auth-Token`，值为 VSCode 启动时随机生成的 32 字节 token（每次 VSCode 重启重新生成，生命周期仅限当前会话）
+- **防御边界**：双层认证合并后的信任边界是「请求来自浏览器扩展生态而非任意网页」；对已能在本机访问 `127.0.0.1` 端口的本地进程不设防。若需防御本地进程，需要引入系统级隔离机制（如 per-extension 密钥协商），这超出了本扩展的设计范围
 
 ### Webview / 状态栏 XSS 防护
 
@@ -82,15 +87,15 @@ Cookie Bridge 采用**双层 Token 认证**保护 `/health` 和 `/cookies` 端�
 
 | 数据类型 | 存储位置 | 用途 |
 |---------|---------|------|
-| API Key / Token / Cookie | VSCode Secret Storage | 访问 AI 服务 API（手动输入或 Bridge 推送） |
+| API Key / Token / Cookie | VSCode Secret Storage | 访问 AI 服务 API（仅手动输入的 `manual` 来源服务） |
 | 配额数据 | VSCode globalState（本地 JSON 文件） | 仪表盘展示 |
 | 历史用量 | VSCode globalState（本地 JSON 文件） | 趋势分析和图表展示 |
 | 配置设置 | VSCode globalState + Settings | 用户偏好（刷新间隔、预警阈值、AFK 阈值） |
-| Bridge 状态 | VSCode globalState | Bridge 卡片连接状态展示 |
+| Bridge 状态 | VSCode globalState | Bridge 卡片连接状态展示（connected / lastPushAt / receivedKinds / lastError） |
 
 ### 数据共享
 
-- **不与第三方共享**：不向任何外部服务、服务器或个人传输数据
+- **不与第三方共享**：不向任何外部服务、服务器或个人传输数据（Data Bridge 推送仅发生在本机回环 `127.0.0.1`）
 - **不上传云端**：所有数据保留在用户本地设备
 - **无分析遥测**：不发送使用统计或崩溃报告
 
@@ -98,7 +103,7 @@ Cookie Bridge 采用**双层 Token 认证**保护 `/health` 和 `/cookies` 端�
 
 - **历史数据**：最多保留 30 天，按 UTC 日期去重，超期自动清理
 - **配置数据**：保留至用户主动删除或卸载扩展
-- **Cookie / API Key**：保留至用户切换为手动模式或删除服务；Bridge 来源的凭证会在浏览器扩展下次推送时覆盖更新
+- **Cookie / API Key**：保留至用户切换为手动模式或删除服务；`manual` 来源凭证由用户本地保管，Data Bridge 架构下浏览器凭证不出浏览器、VSCode 端 bridge 数据源服务不存储任何凭证
 
 ### 用户权利
 
@@ -109,4 +114,4 @@ Cookie Bridge 采用**双层 Token 认证**保护 `/health` 和 `/cookies` 端�
 
 ---
 
-最后更新：2026-06-15
+最后更新：2026-09-05

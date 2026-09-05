@@ -33,21 +33,6 @@ export const KIMI_STYLES = `
 	margin-top: 4px;
 }
 
-.kimi-header-row3 {
-	margin-top: 4px;
-}
-
-.kimi-renew-label {
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
-}
-
-.kimi-renew-time {
-	font-size: 11px;
-	color: var(--vscode-foreground);
-	font-weight: 500;
-}
-
 .kimi-header-left {
 	display: flex;
 	align-items: center;
@@ -77,17 +62,6 @@ export const KIMI_STYLES = `
 	font-size: 12px;
 	margin-left: auto;
 	flex-shrink: 0;
-}
-
-/* 等级徽章 */
-.kimi-level-badge {
-	background: linear-gradient(135deg, #9B59B6, #8E44AD);
-	color: #fff;
-	font-size: 9px;
-	font-weight: 700;
-	padding: 1px 6px;
-	border-radius: 10px;
-	letter-spacing: 0.5px;
 }
 
 /* ===== 用量统计区域 ===== */

@@ -10,13 +10,39 @@
 
 const GLM_BASE_URL = 'https://open.bigmodel.cn';
 
+/** 凭证副本的保留上限（24h，与 background.js 的 CREDENTIAL_TTL_MS 保持一致） */
+const CREDENTIAL_TTL_MS = 24 * 60 * 60 * 1000;
+
 /**
- * 从 storage 读取 GLM API Key
+ * 从 storage 读取 GLM API Key（带 TTL 的 { value, capturedAt } 对象副本）：
+ * 超 24h 或无时间戳的存量裸字符串均视为过期，清除一次并返回 null。
  */
 async function getGlmApiKey() {
 	try {
 		const result = await chrome.storage.local.get('glmApiKey');
-		return result.glmApiKey ?? null;
+		const entry = result.glmApiKey;
+		if (entry && typeof entry === 'object' && entry.value) {
+			if (entry.capturedAt && Date.now() - entry.capturedAt <= CREDENTIAL_TTL_MS) {
+				return entry.value;
+			}
+			await chrome.storage.local.remove('glmApiKey');
+			// 副本过期：fallthrough 到下方自愈重播种
+		} else if (typeof entry === 'string' && entry) {
+			// 存量裸字符串（无时间戳），视为过期清除一次
+			await chrome.storage.local.remove('glmApiKey');
+		}
+		// P2-6 自愈：TTL 副本唯一原写入方是 popup（saveGlmApiKeyCopy），background 侧 24h 无
+		// popup 开盖时副本过期断供，relay 会持续推「未配置 GLM API Key」错误卡。
+		// 此处从 dashboardConfig.glmApiKey 重新播种副本（popup 同款 { value, capturedAt } 结构）
+		try {
+			const cfg = await chrome.storage.local.get('dashboardConfig');
+			const key = cfg.dashboardConfig?.glmApiKey;
+			if (typeof key === 'string' && key) {
+				await chrome.storage.local.set({ glmApiKey: { value: key, capturedAt: Date.now() } });
+				return key;
+			}
+		} catch { /* ignore，返回 null */ }
+		return null;
 	} catch (err) {
 		console.error('[GLMAPI] 读取 API Key 失败:', err);
 		return null;
@@ -96,6 +122,15 @@ function getGlmQuotaLabel(item) {
 }
 
 /**
+ * 把 nextResetTime（Unix 秒/毫秒时间戳）防御性转换为毫秒时间戳。
+ * GLM 接口该字段单位不稳定（历史返回秒，现为毫秒）：小于 1e12 视为秒级统一转毫秒，无效返回 null。
+ */
+function toResetMs(value) {
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+	return value < 1e12 ? value * 1000 : value;
+}
+
+/**
  * 解析用量统计限额
  */
 function parseLimits(raw) {
@@ -109,7 +144,7 @@ function parseLimits(raw) {
 				percent: item.percentage,
 				used: undefined,
 				limit: undefined,
-				resetsAt: item.nextResetTime ? item.nextResetTime * 1000 : null,
+				resetsAt: toResetMs(item.nextResetTime),
 			});
 		} else if (item.type === 'TIME_LIMIT') {
 			slots.push({
@@ -117,7 +152,7 @@ function parseLimits(raw) {
 				percent: item.percentage,
 				used: item.currentValue,
 				limit: item.usage,
-				resetsAt: item.nextResetTime ? item.nextResetTime * 1000 : null,
+				resetsAt: toResetMs(item.nextResetTime),
 			});
 		}
 	}
@@ -257,10 +292,12 @@ export async function fetchGlmQuota() {
 	}
 
 	try {
-		// 1. 用量统计 + 套餐订阅（并行）
-		const [quotaRaw, subRaw] = await Promise.all([
+		// 4 个请求互不依赖，一次性并行（历史两阶段串行会把首屏最坏延迟从 30s 翻倍压到 15s）
+		const [quotaRaw, subRaw, modelUsage, toolUsage] = await Promise.all([
 			glmGet('/api/monitor/usage/quota/limit', token),
 			glmGet('/api/biz/subscription/list', token).catch(() => undefined),
+			fetchGlmModelUsage(token, 1),
+			fetchGlmToolUsage(token, 1),
 		]);
 
 		if (quotaRaw.code !== 200 || !quotaRaw.success) {
@@ -269,12 +306,6 @@ export async function fetchGlmQuota() {
 
 		const { slots, level } = parseLimits(quotaRaw.data ?? { limits: [] });
 		const nextRenewTime = subRaw ? parseSubscription(subRaw) : undefined;
-
-		// 2. 模型用量 + 工具用量（并行）
-		const [modelUsage, toolUsage] = await Promise.all([
-			fetchGlmModelUsage(token, 1),
-			fetchGlmToolUsage(token, 1),
-		]);
 
 		return {
 			id: 'glm',

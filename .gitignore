@@ -2,26 +2,24 @@
 # AI Quota Dashboard — Git Ignore
 # ============================================
 
-# === VSCode Extension ===
-vscode/out/
-vscode/dist/
-vscode/node_modules/
-vscode/.vscode-test/
-vscode/coverage/
-vscode/.eslintcache
+# === 依赖与构建产物（无斜杠前缀 = 匹配任意深度）===
+node_modules/
+dist/
+coverage/
+out/
+*.tsbuildinfo
+*.map
 
-# === Browser Extensions ===
-chrome/node_modules/
-chrome/dist/
-chrome/**/*.map
-firefox/node_modules/
-firefox/dist/
-firefox/**/*.map
+# === VSCode Extension 专属 ===
+.vscode-test/
+.eslintcache
 
-# === Package Artifacts ===
+# === 打包产物 ===
 *.vsix
-ai-quota-cookie-bridge-*.zip
+*.zip
 build/
+# 注意：chrome/ 与 firefox/ 目录内的构建残留由各自嵌套的
+# .gitignore 白名单拦截（只放行 manifest.json 与 icons/）
 
 # === OS Generated ===
 .DS_Store
@@ -58,14 +56,10 @@ yarn-error.log*
 tmp/
 
 # === Runtime ===
-# Cookie Bridge 临时端口文件
-.ai-quota-bridge-port
-
-# === AI Assistant Context ===
-# (可能包含敏感 API 详情或个人配置)
-AGENTS.md
-opencode.json
+# Cookie Bridge PID 端口文件：实际写入 os.tmpdir()/.ai-quota-bridge-port-{pid}
+# 此处防御性忽略，防止调试时落在仓库内
+.ai-quota-bridge-port-*
 
 # === VSCode Workspace Settings ===
-# (用户级个人设置，不应提交)
+# (用户级个人设置，不应提交；launch.json/tasks.json/extensions.json 为团队共享)
 .vscode/settings.json

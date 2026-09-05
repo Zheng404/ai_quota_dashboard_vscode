@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { extractDomain, buildTimeRangeQuery, daysToRange } from './provider';
+import { extractDomain, buildTimeRangeQuery, daysToRange, sanitizeTimestamp } from './provider';
+
+describe('sanitizeTimestamp', () => {
+	it('converts seconds to milliseconds', () => {
+		expect(sanitizeTimestamp(1789701300)).toBe(1789701300000);
+	});
+
+	it('keeps milliseconds as-is', () => {
+		expect(sanitizeTimestamp(1789701300000)).toBe(1789701300000);
+	});
+
+	it('returns undefined for invalid values', () => {
+		expect(sanitizeTimestamp(0)).toBeUndefined();
+		expect(sanitizeTimestamp(-1)).toBeUndefined();
+		expect(sanitizeTimestamp(NaN)).toBeUndefined();
+		expect(sanitizeTimestamp(null)).toBeUndefined();
+		expect(sanitizeTimestamp(undefined)).toBeUndefined();
+	});
+});
 
 describe('extractDomain', () => {
 	it('extracts domain from full URL with path', () => {

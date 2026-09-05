@@ -2,8 +2,8 @@ import { QuotaProvider } from '../types';
 import { BridgeServiceData } from './types';
 import { loadBridgeState } from './state';
 
-// Cookie Bridge 数据提供者
-// 该服务不拉取远程 API，只展示浏览器扩展推送的凭证状态
+// Data Bridge 数据提供者
+// 该服务不拉取远程 API，只展示浏览器扩展推送的配额数据状态
 
 export const bridgeProvider: QuotaProvider = {
 	kind: 'bridge',
@@ -11,12 +11,12 @@ export const bridgeProvider: QuotaProvider = {
 		const state = loadBridgeState();
 		return {
 			id: 'bridge',
-			name: 'Cookie Bridge',
+			name: 'Data Bridge',
 			kind: 'bridge',
 			slots: [],
 			updatedAt: Date.now(),
 			lastPushAt: state.lastPushAt,
-			receivedCredentials: state.receivedCredentials,
+			receivedKinds: state.receivedKinds,
 			connected: state.connected,
 			lastError: state.lastError,
 		};

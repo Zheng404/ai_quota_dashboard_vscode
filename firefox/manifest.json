@@ -7,13 +7,14 @@
     }
   },
   "name": "AI Quota Dashboard",
-  "version": "1.1.0",
-  "description": "AI 配额用量仪表盘 — 支持 GLM Coding Plan、Kimi Membership、Xiaomi MiMo 等服务的配额监控与 Cookie Bridge 凭证转发",
+  "version": "1.1.1",
+  "description": "AI 配额用量仪表盘 — 支持 GLM Coding Plan、Kimi Membership、Xiaomi MiMo 等服务的配额监控与 Data Bridge 数据推送",
   "permissions": [
     "cookies",
     "storage",
     "alarms",
-    "tabs"
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.kimi.com/",
@@ -25,9 +26,16 @@
     "scripts": ["scripts/background.js"],
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://www.kimi.com/*"],
+      "js": ["scripts/kimi-content.js"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "AI Quota Dashboard — 配额监控与凭证转发"
+    "default_title": "AI Quota Dashboard — 配额监控与数据推送"
   },
   "commands": {
     "_execute_action": {

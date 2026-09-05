@@ -1,4 +1,4 @@
-// ========== Cookie Bridge 扩展数据类型 ==========
+// ========== Data Bridge 扩展数据类型 ==========
 
 /** Bridge 服务专用数据（扩展自 ServiceData） */
 export interface BridgeServiceData {
@@ -9,8 +9,8 @@ export interface BridgeServiceData {
 	updatedAt: number;
 	/** 浏览器扩展最后推送时间 */
 	lastPushAt?: number;
-	/** 已接收到的凭证种类 */
-	receivedCredentials?: string[];
+	/** 已接收到配额数据的服务种类 */
+	receivedKinds?: string[];
 	/** 连接状态 */
 	connected?: boolean;
 	/** 最后错误信息 */

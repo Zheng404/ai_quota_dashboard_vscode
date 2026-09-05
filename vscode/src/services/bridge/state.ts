@@ -1,16 +1,17 @@
 import * as vscode from 'vscode';
 
-// Cookie Bridge 状态管理（内存 + globalState 持久化）
+// Data Bridge 状态管理（内存 + globalState 持久化）
 
 interface BridgeState {
 	lastPushAt?: number;
-	receivedCredentials: string[];
+	/** 已接收配额数据的服务种类 */
+	receivedKinds: string[];
 	connected: boolean;
 	lastError?: string;
 }
 
 const DEFAULT_STATE: BridgeState = {
-	receivedCredentials: [],
+	receivedKinds: [],
 	connected: false,
 };
 
