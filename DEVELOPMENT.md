@@ -714,8 +714,8 @@ export default defineConfig({
 
 # 输出（版本号自动取自 vscode/package.json，无需手工同步）：
 # build/
-# ├── ai-quota-dashboard-chrome-v1.1.1.zip
-# ├── ai-quota-dashboard-firefox-v1.1.1.zip
+# ├── ai-quota-dashboard-chrome-v1.1.5.zip
+# ├── ai-quota-dashboard-firefox-v1.1.5.zip
 # ├── ai-quota-dashboard-x.x.x.vsix
 # └── staging/               # 组装目录（chrome/ + firefox/，可 unpacked 调试）
 ```

@@ -2,7 +2,7 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.1.5] - 2026-09-05
 
 ### 共享（浏览器扩展 + VSCode）
 
@@ -443,6 +443,7 @@
 - Webview JS 为字符串拼接，无类型检查
 - `warnThreshold` 配置声明但未实际触发警告通知
 
+[1.1.5]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.1.5
 [1.1.1]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.1.1
 [1.1.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.1.0
 [1.0.0]: https://github.com/Zheng404/ai_quota_dashboard_vscode/releases/tag/v1.0.0

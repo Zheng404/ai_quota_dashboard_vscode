@@ -134,7 +134,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 #### Chrome / Edge
 
-1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-chrome-v1.1.1.zip` 并解压
+1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-chrome-v1.1.5.zip` 并解压
 2. 打开 Chrome/Edge，地址栏输入 `chrome://extensions/`
 3. 右上角开启 **开发者模式**
 4. 点击 **加载已解压的扩展程序**
@@ -142,7 +142,7 @@ code --install-extension ai-quota-dashboard-*.vsix
 
 #### Firefox
 
-1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-firefox-v1.1.1.zip` 并解压
+1. 从 [GitHub Releases](https://github.com/Zheng404/ai_quota_dashboard_vscode/releases) 下载 `ai-quota-dashboard-firefox-v1.1.5.zip` 并解压
 2. 打开 Firefox，地址栏输入 `about:debugging#/runtime/this-firefox`
 3. 点击 **临时载入附加组件**
 4. 选择解压后的 `firefox/manifest.json`
@@ -581,8 +581,8 @@ npm test
 # 输出目录（版本号自动取自 vscode/package.json）
 build/
 ├── ai-quota-dashboard-*.vsix             # VSCode 扩展
-├── ai-quota-dashboard-chrome-v1.1.1.zip  # Chrome / Edge 浏览器扩展
-├── ai-quota-dashboard-firefox-v1.1.1.zip # Firefox 浏览器扩展
+├── ai-quota-dashboard-chrome-v1.1.5.zip  # Chrome / Edge 浏览器扩展
+├── ai-quota-dashboard-firefox-v1.1.5.zip # Firefox 浏览器扩展
 └── staging/                              # 可 unpacked 调试的组装目录
 ```
 
