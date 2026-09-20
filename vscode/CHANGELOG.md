@@ -2,6 +2,21 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.1.6] - 2026-09-20
+
+### 浏览器扩展
+
+- **修复 Kimi 网页凭证无法自动续期**（架构级修复）
+  - 根因 ① 续期判定只看 `capturedAt`：续期后台页加载时 content script 立即重报页面 localStorage 里的旧令牌，旧令牌借新时间戳伪装「新鲜」，等待逻辑误判成功并提前关页，页面异步鉴权永远没机会写入新 access_token（症状：凭证只能手动开 kimi.com 后刷新）
+  - 根因 ② MV3 Service Worker 在纯定时器长等待（15s 等加载 + 20s 轮询）下约 30s 即被回收，`finally` 不执行导致续期页永久残留；残留死页又被宽松的「pinned + 非激活」复用匹配命中，续期链被一页死卡死、永远开不出新页
+  - 修复：令牌新鲜度改按 JWT `exp` 判定（60s 余量，非 JWT 回退 capturedAt）；镜像保存拒绝同一令牌或 exp 更早的滞后令牌覆盖（防毒化 + 防多标签页镜像倒退）；续期架构重构为 fire-and-forget——开/重载续期页后立即返回、SW 内零长等待，新令牌经镜像收敛由 relay 周期自然消费；续期页以 URL `#aqd-renewal` hash + tabId 跟踪表双标识，镜像变新鲜或页龄超 15 分钟自动关闭，死 tabId 自动剪除；新令牌入库后通知闭环——popup/dashboard 即时单服务刷新 + VSCode 即时推送（不再等 healthCheck 周期）
+  - 加固：绝不自动关闭用户正在查看的激活续期页；并发 401 双请求并发护栏 + 30s 最小创建窗口防开页抖动；`kimiAutoRefresh` 关闭时不开页的行为保持；401 → 作废 → 强制重续期自愈闭环保留（最坏频率 ≥1 次/5 分钟）
+  - 提示：历史版本残留的无标记 pinned kimi.com 页需手动关闭一次，之后不再产生
+
+### 工程
+
+- 完善 `.gitignore`：新增密钥/证书类（`*.pem` / `*.key` / `*.crx`）、Firefox web-ext 输出、合并残留（`*.orig` / `*.rej`）、Windows `desktop.ini`、pnpm/lerna 调试日志；加入 Serena 工具本地上下文目录 `.serena/`
+
 ## [1.1.5] - 2026-09-05
 
 ### 共享（浏览器扩展 + VSCode）

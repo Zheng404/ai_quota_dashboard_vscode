@@ -18,6 +18,8 @@ out/
 *.vsix
 *.zip
 build/
+# Firefox web-ext 打包输出目录
+web-ext-artifacts/
 # 注意：chrome/ 与 firefox/ 目录内的构建残留由各自嵌套的
 # .gitignore 白名单拦截（只放行 manifest.json 与 icons/）
 
@@ -29,6 +31,7 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
 
 # === IDE / Editor ===
 .history/
@@ -36,6 +39,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+# Serena 工具本地项目上下文（project.yml / memories / cache），不提交
+.serena/
 
 # === Logs ===
 logs/
@@ -43,6 +48,8 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # === Environment / Secrets ===
 .env
@@ -54,6 +61,15 @@ yarn-error.log*
 *.temp
 .cache/
 tmp/
+# 合并/补丁工具残留
+*.orig
+*.rej
+
+# === 密钥与证书（绝不可提交） ===
+*.pem
+*.key
+# Chrome 扩展签名打包产物
+*.crx
 
 # === Runtime ===
 # Cookie Bridge PID 端口文件：实际写入 os.tmpdir()/.ai-quota-bridge-port-{pid}

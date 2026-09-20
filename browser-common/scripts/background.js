@@ -39,8 +39,18 @@ import {
 	loadCredentialViaBackgroundTab,
 	recordRefresh,
 } from './lib/credential.js';
-import { saveKimiTokenRelay, getKimiAccessToken, invalidateKimiTokenRelay } from './lib/kimi-relay.js';
+import { saveKimiTokenRelay, getKimiAccessToken, invalidateKimiTokenRelay, setOnTokenRenewedHook } from './lib/kimi-relay.js';
 import { relayData } from './lib/relay.js';
+
+// 新 Kimi 令牌经镜像入库（页面换发 / 续期页收敛）时：广播 COOKIE_CHANGED 让打开的
+// popup/dashboard 即时单服务刷新，同时 relayData(true) 把新数据即时推给 VSCode，
+// 不必等下一轮 healthCheck 周期（R3：新令牌的数据不积压）
+setOnTokenRenewedHook(() => {
+  chrome.runtime.sendMessage({ action: MSG.COOKIE_CHANGED, kind: 'kimi' }).catch(() => {
+    // 无监听者（Popup/Dashboard 未打开），忽略
+  });
+  relayData(true).catch(() => { /* 推送失败由重传队列兜底 */ });
+});
 
 // ===== 凭证失效检测 + 自动刷新（编排层：检测在 credential，数据推送在 relay）=====
 
@@ -383,10 +393,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   // popup 侧按需索取 relay 镜像的 Kimi access_token（api/kimi.js 调用）
-  // popup 首屏关键路径：跳过后台开页续期（15s+），陈旧镜像直接返回旧值/null，
-  // 续期由 relay 周期推送（tokenProvider 路径，默认 allowBackgroundTab）负责
+  // fire-and-forget 续期不阻塞首屏：镜像陈旧时会顺带确保续期后台页存在并立即返回，
+  // 新令牌经镜像收敛后，popup 下次刷新即可拿到
   if (msg.action === MSG.GET_KIMI_TOKEN) {
-    getKimiAccessToken({ allowBackgroundTab: false })
+    getKimiAccessToken()
       .then(token => sendResponse({ token: token || null }))
       .catch(() => sendResponse({ token: null }));
     return true;
