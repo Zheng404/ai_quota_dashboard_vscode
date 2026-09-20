@@ -153,40 +153,58 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Copy shared browser code
-        run: |
-          cp -r browser-common/* chrome/
-          cp -r browser-common/* firefox/
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode/package-lock.json
 
-      - name: Package Chrome extension
+      - name: Install dependencies (esbuild)
+        run: npm --prefix vscode ci
+
+      # build.sh 以 vscode/package.json 为版本号唯一可信源，而本 job 检出的是 tag
+      # 提交——若 tag 与发布版本不一致会导致资产名错配，此处按 tag 版本对齐（确定性）。
+      # 仓库约定：发版准备提交中已预先 bump 版本时本步为无操作。
+      - name: Sync version from tag
         run: |
           VERSION="${{ needs.vscode.outputs.version }}"
-          cd chrome
-          zip -r ../ai-quota-dashboard-chrome-v${VERSION}.zip manifest.json browser-api.js cache.js config.js popup.html popup.js dashboard.html dashboard.js templates.js styles.css api/ scripts/ icons/
+          node -e "const fs=require('fs');const p='vscode/package.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));if(j.version!=='$VERSION'){j.version='$VERSION';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');console.log('Synced version to $VERSION')}else{console.log('Version already $VERSION')}"
 
-      - name: Package Firefox extension
-        run: |
-          VERSION="${{ needs.vscode.outputs.version }}"
-          cd firefox
-          zip -r ../ai-quota-dashboard-firefox-v${VERSION}.zip manifest.json browser-api.js cache.js config.js popup.html popup.js dashboard.html dashboard.js templates.js styles.css api/ scripts/ icons/
+      # 打包必须走 build.sh staging 流程（与 ci.yml 一致）：rsync 共享代码 +
+      # esbuild IIFE bundle 覆盖 background.js + 改写 staging manifest version + 打 zip。
+      # ⚠️ 禁止回退为手工 cp+zip 清单——v1.1.6 曾因此漏掉 shared-ui.js / protocol/，
+      # 且 scripts/background.js 是未 bundle 的 ESM 源码，发布包直接不可用
+      - name: Package browser extensions
+        run: bash build.sh
 
-      - name: Cleanup copied files
+      # 断言：IIFE bundle、protocol 共享层、shared-ui.js 必须进包
+      - name: Assert packaged artifacts
         run: |
-          cd chrome && git clean -fd && cd ..
-          cd firefox && git clean -fd
+          for browser in chrome firefox; do
+            zip_file="build/ai-quota-dashboard-${browser}-v$(node -p "require('./vscode/package.json').version").zip"
+            echo "校验 ${zip_file}..."
+            unzip -l "$zip_file" | grep -q 'scripts/background.js' \
+              || { echo "FAIL: scripts/background.js 不在 ${browser} 包内"; exit 1; }
+            unzip -l "$zip_file" | grep -q 'protocol/index.js' \
+              || { echo "FAIL: protocol/index.js 不在 ${browser} 包内"; exit 1; }
+            unzip -l "$zip_file" | grep -q 'shared-ui.js' \
+              || { echo "FAIL: shared-ui.js 不在 ${browser} 包内"; exit 1; }
+            echo "PASS: ${browser} 包校验通过"
+          done
 
       - name: Upload Chrome artifact
         uses: actions/upload-artifact@v4
         with:
           name: browser-extension-chrome-release
-          path: ai-quota-dashboard-chrome-v*.zip
+          path: build/ai-quota-dashboard-chrome-v*.zip
           retention-days: 90
 
       - name: Upload Firefox artifact
         uses: actions/upload-artifact@v4
         with:
           name: browser-extension-firefox-release
-          path: ai-quota-dashboard-firefox-v*.zip
+          path: build/ai-quota-dashboard-firefox-v*.zip
           retention-days: 90
 
     outputs:
