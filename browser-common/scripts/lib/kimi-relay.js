@@ -260,9 +260,14 @@ async function writeRenewalTabIds(tracked) {
  *  激活页留在跟踪表内，转为非激活后由时龄清理接手。 */
 async function closeRenewalTabs() {
   const marked = await listMarkedRenewalTabs({ skipAgeOut: true });
+  if (marked.length === 0) return;
   const closable = marked.filter(t => !t.active);
+  // 诊断日志：观测关页链路是否命中（激活保护的页合法常驻，等待用户切走后下轮关闭）
+  console.log(`[KimiRelay] 关页检查：标记 ${marked.length} 个续期页（激活保护 ${marked.length - closable.length} 个），关闭 ${closable.length} 个`);
   for (const tab of closable) {
-    try { await chrome.tabs.remove(tab.id); } catch { /* 页可能已被用户关闭 */ }
+    try { await chrome.tabs.remove(tab.id); } catch (err) {
+      console.warn(`[KimiRelay] 关闭续期页 ${tab.id} 失败:`, err.message);
+    }
   }
   if (closable.length > 0) {
     const tracked = await readRenewalTabIds();
