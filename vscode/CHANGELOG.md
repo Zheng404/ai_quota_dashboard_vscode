@@ -2,6 +2,14 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.1.7] - 2026-09-21
+
+### 浏览器扩展
+
+- **续期后台页关闭策略调整**：续期页是扩展内部实现细节，**无论标签页是否处于激活/被查看状态，续期成功后下一个周期（≤60 秒）即自动关闭**，换发失败时 15 分钟龄强制回收兜底（此前「绝不关闭激活页」的保护会导致常驻：`tab.active` 的语义是「某窗口的选中页」，非聚焦窗口的选中页会在用户毫无感知的情况下被永久保护）
+- **续期页关页链路增加诊断日志**：`关页检查`（命中数/关闭数）、`已关闭 N 个续期后台页`、`关闭续期页 xxx 失败` 告警，关页异常可凭日志直接定位环节
+- 修复 release 工作流浏览器打包：改用 `bash build.sh` staging 流程 + 打包内容断言（IIFE bundle / `protocol/` / `shared-ui.js`），修复 v1.1.6 GitHub Release 资产缺 `shared-ui.js` 与 `protocol/`、`background.js` 未 bundle 的问题（已回填 v1.1.6 资产）
+
 ## [1.1.6] - 2026-09-20
 
 ### 浏览器扩展
