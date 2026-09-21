@@ -256,31 +256,28 @@ async function writeRenewalTabIds(tracked) {
 }
 
 /** 关闭并取消跟踪本扩展续期页（含 SW 回收残留的 hash 标记页）。
- *  绝不关闭用户正在查看的激活页（tab.active）——续期使命已完成也不夺人所看，
- *  激活页留在跟踪表内，转为非激活后由时龄清理接手。 */
+ *  产品决策：续期页是扩展内部实现细节，无论 tab.active 与否一律关闭（用户明确要求），
+ *  失败仅告警不阻断（页可能已被用户手动关闭）。 */
 async function closeRenewalTabs() {
   const marked = await listMarkedRenewalTabs({ skipAgeOut: true });
   if (marked.length === 0) return;
-  const closable = marked.filter(t => !t.active);
-  // 诊断日志：观测关页链路是否命中（激活保护的页合法常驻，等待用户切走后下轮关闭）
-  console.log(`[KimiRelay] 关页检查：标记 ${marked.length} 个续期页（激活保护 ${marked.length - closable.length} 个），关闭 ${closable.length} 个`);
-  for (const tab of closable) {
+  // 诊断日志：观测关页链路命中情况
+  console.log(`[KimiRelay] 关页检查：标记 ${marked.length} 个续期页，全部关闭`);
+  for (const tab of marked) {
     try { await chrome.tabs.remove(tab.id); } catch (err) {
       console.warn(`[KimiRelay] 关闭续期页 ${tab.id} 失败:`, err.message);
     }
   }
-  if (closable.length > 0) {
-    const tracked = await readRenewalTabIds();
-    for (const tab of closable) tracked.delete(tab.id);
-    await writeRenewalTabIds(tracked);
-    console.log(`[KimiRelay] 已关闭 ${closable.length} 个续期后台页`);
-  }
+  const tracked = await readRenewalTabIds();
+  for (const tab of marked) tracked.delete(tab.id);
+  await writeRenewalTabIds(tracked);
+  console.log(`[KimiRelay] 已关闭 ${marked.length} 个续期后台页`);
 }
 
 /**
  * 列出本扩展创建的续期页（URL hash 标记或跟踪表命中）。
- * 超过 RENEWAL_TAB_MAX_AGE_MS 的非激活残留页顺手关闭并取消跟踪（激活页不夺人所看，
- * 保留跟踪待其非激活后下轮清理）；仅有 hash 标记但不在跟踪表的页按「现在」收养入表；
+ * 超过 RENEWAL_TAB_MAX_AGE_MS 的残留页顺手关闭并取消跟踪（无论激活与否，
+ * 续期页是内部实现细节一律回收）；仅有 hash 标记但不在跟踪表的页按「现在」收养入表；
  * 已被用户关闭的死 tabId 从跟踪表剪除（只增不减会让存储无限累积）。
  */
 async function listMarkedRenewalTabs({ skipAgeOut = false } = {}) {
@@ -306,16 +303,14 @@ async function listMarkedRenewalTabs({ skipAgeOut = false } = {}) {
       if (!liveIds.has(id)) { tracked.delete(id); pruned = true; }
     }
     if (adopted.length > 0 || pruned) await writeRenewalTabIds(tracked);
-    if (!skipAgeOut) {
-      const closable = expired.filter(t => !t.active);
-      for (const tab of closable) {
+    if (!skipAgeOut && expired.length > 0) {
+      // 产品决策：无论激活与否一律清理（同 closeRenewalTabs）
+      for (const tab of expired) {
         try { await chrome.tabs.remove(tab.id); } catch { /* ignore */ }
       }
-      if (closable.length > 0) {
-        for (const tab of closable) tracked.delete(tab.id);
-        await writeRenewalTabIds(tracked);
-        console.log(`[KimiRelay] 清理 ${closable.length} 个超期续期残留页`);
-      }
+      for (const tab of expired) tracked.delete(tab.id);
+      await writeRenewalTabIds(tracked);
+      console.log(`[KimiRelay] 清理 ${expired.length} 个超期续期残留页`);
     }
     return alive;
   } catch {
