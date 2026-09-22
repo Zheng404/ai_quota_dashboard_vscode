@@ -12,6 +12,8 @@
  * 永远空等（自动续期失活的事故链）。新令牌由 content script 上报经镜像收敛，
  * 后续 relay 周期自然消费；续期页在镜像变新鲜或存活超 15 分钟后自动关闭，
  * 由 URL hash 标记（#aqd-renewal）+ tabId 跟踪表双标识识别，杜绝误复用/残留。
+ * 超期回收另由 sweepRenewalTabs 经 healthCheck alarm 周期强制执行（与 relay 链解耦）；
+ * 关页动作一律 await——SW 回收会截断 fire-and-forget 的异步关页链（残留根因）。
  *
  * 依赖：protocol（消息 action / 超时）、cookie-utils（凭证 TTL）。
  */
@@ -137,8 +139,10 @@ export async function saveKimiTokenRelay(payload) {
   } catch (err) {
     console.error('[KimiRelay] 保存令牌镜像失败:', err.message);
   }
-  // 镜像已更新（续期使命完成）：fire-and-forget 关闭续期后台页
-  void closeRenewalTabs();
+  // 镜像已更新（续期使命完成）：关闭续期后台页。
+  // 必须 await 而非 void：MV3 SW 在消息应答后可能被回收，fire-and-forget 的
+  // 异步关页链（query→storage→remove）会被截断，导致续期页残留不关闭
+  await closeRenewalTabs();
   // 通知 background：新令牌已入库，即时刷新 popup/dashboard 卡片并推送 VSCode
   if (onTokenRenewedHook) {
     try { onTokenRenewedHook(record); } catch { /* 钩子异常不影响入库 */ }
@@ -235,14 +239,16 @@ async function writeLastTabRefresh(ts) {
 
 // ===== 续期后台标签页管理（fire-and-forget：SW 内零长等待，防回收残留死页）=====
 
-/** 读取续期页跟踪表（tabId → createdAt） */
+/** 读取续期页跟踪表（tabId → createdAt）。读取失败返回 null——调用方不得按空表
+ *  继续写回，否则会抹掉既有跟踪记录（续期页失联残留的根因之一） */
 async function readRenewalTabIds() {
   try {
     const result = await chrome.storage.local.get(RENEWAL_TABS_KEY);
     const list = result[RENEWAL_TABS_KEY];
     return new Map(Array.isArray(list) ? list.map(e => [e.id, e.createdAt || 0]) : []);
-  } catch {
-    return new Map();
+  } catch (err) {
+    console.warn('[KimiRelay] 读取续期页跟踪表失败:', err.message);
+    return null;
   }
 }
 
@@ -252,7 +258,42 @@ async function writeRenewalTabIds(tracked) {
     await chrome.storage.local.set({
       [RENEWAL_TABS_KEY]: [...tracked].map(([id, createdAt]) => ({ id, createdAt })),
     });
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.warn('[KimiRelay] 写入续期页跟踪表失败:', err.message);
+  }
+}
+
+/** 续期页跟踪表互斥锁（模块级 Promise 链）：跟踪表是读-改-写结构，并发执行的
+ *  sweep / closeRenewalTabs / ensureRenewalTab / onUpdated 捕获之间若不加锁，
+ *  后写者会用旧快照覆盖先写者，把刚登记的续期页记录抹掉——hash 被 SPA 抹掉的
+ *  页面一旦脱离跟踪，所有清理路径都再看不见它（残留不关闭的根因） */
+let renewalTabsLock = Promise.resolve();
+function withRenewalTabsLock(fn) {
+  const run = renewalTabsLock.then(fn, fn);
+  renewalTabsLock = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+/** 导航提交期捕获续期页：续期页 URL 带 #aqd-renewal hash，但 SPA 启动后可能经
+ *  history API 抹掉 hash，事后靠 URL 查询再也认不出它。onUpdated 在每次导航提交
+ *  时触发，趁 hash 尚在即登记入跟踪表（tabs 权限已有，不新增权限）。
+ *  监听注册在模块作用域（background 启动即生效；SW 唤醒时随模块重新注册）。 */
+if (typeof chrome.tabs?.onUpdated?.addListener === 'function') {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.url?.includes(RENEWAL_HASH)) {
+      void trackRenewalTab(tabId).catch(() => { /* 登记失败由后续清扫兜底 */ });
+    }
+  });
+}
+
+/** 将导航中携带续期 hash 的标签页登记入跟踪表（幂等，持锁防并发覆盖） */
+async function trackRenewalTab(tabId) {
+  await withRenewalTabsLock(async () => {
+    const tracked = await readRenewalTabIds();
+    if (!tracked || tracked.has(tabId)) return;
+    tracked.set(tabId, Date.now());
+    await writeRenewalTabIds(tracked);
+  });
 }
 
 /** 关闭并取消跟踪本扩展续期页（含 SW 回收残留的 hash 标记页）。
@@ -268,9 +309,13 @@ async function closeRenewalTabs() {
       console.warn(`[KimiRelay] 关闭续期页 ${tab.id} 失败:`, err.message);
     }
   }
-  const tracked = await readRenewalTabIds();
-  for (const tab of marked) tracked.delete(tab.id);
-  await writeRenewalTabIds(tracked);
+  // 从跟踪表摘除已关闭页（持锁防并发覆盖刚登记的记录；读取失败则保留表不动）
+  await withRenewalTabsLock(async () => {
+    const tracked = await readRenewalTabIds();
+    if (!tracked) return;
+    for (const tab of marked) tracked.delete(tab.id);
+    await writeRenewalTabIds(tracked);
+  });
   console.log(`[KimiRelay] 已关闭 ${marked.length} 个续期后台页`);
 }
 
@@ -283,39 +328,69 @@ async function closeRenewalTabs() {
 async function listMarkedRenewalTabs({ skipAgeOut = false } = {}) {
   try {
     const tabs = await chrome.tabs.query({ url: ['https://www.kimi.com/*', 'https://kimi.com/*'] });
-    const tracked = await readRenewalTabIds();
-    const now = Date.now();
-    const alive = [];
-    const expired = [];
-    const adopted = [];
-    const liveIds = new Set();
-    for (const tab of tabs) {
-      liveIds.add(tab.id);
-      const hashMarked = (tab.url ?? '').includes(RENEWAL_HASH);
-      if (!hashMarked && !tracked.has(tab.id)) continue;
-      if (!tracked.has(tab.id)) { tracked.set(tab.id, now); adopted.push(tab.id); }
-      const createdAt = tracked.get(tab.id) ?? now;
-      (now - createdAt > RENEWAL_TAB_MAX_AGE_MS ? expired : alive).push(tab);
-    }
-    // 剪除已被用户关闭的死 tabId（liveIds 外的跟踪条目）
-    let pruned = false;
-    for (const id of tracked.keys()) {
-      if (!liveIds.has(id)) { tracked.delete(id); pruned = true; }
-    }
-    if (adopted.length > 0 || pruned) await writeRenewalTabIds(tracked);
-    if (!skipAgeOut && expired.length > 0) {
-      // 产品决策：无论激活与否一律清理（同 closeRenewalTabs）
-      for (const tab of expired) {
-        try { await chrome.tabs.remove(tab.id); } catch { /* ignore */ }
+    // 跟踪表读-改-写全程持互斥锁：并发 sweep/close/创建/登记之间的丢失更新
+    // 会让「hash 被 SPA 抹掉」的续期页永久脱离跟踪（残留不关闭的根因之一）
+    return await withRenewalTabsLock(async () => {
+      const tracked = await readRenewalTabIds();
+      // 读取失败不得按空表继续（写回会抹掉既有记录）；本轮清扫放弃
+      if (!tracked) return [];
+      const now = Date.now();
+      const alive = [];
+      const expired = [];
+      const adopted = [];
+      const liveIds = new Set();
+      for (const tab of tabs) {
+        liveIds.add(tab.id);
+        const hashMarked = (tab.url ?? '').includes(RENEWAL_HASH);
+        if (!hashMarked && !tracked.has(tab.id)) continue;
+        if (!tracked.has(tab.id)) { tracked.set(tab.id, now); adopted.push(tab.id); }
+        const createdAt = tracked.get(tab.id) ?? now;
+        (now - createdAt > RENEWAL_TAB_MAX_AGE_MS ? expired : alive).push(tab);
       }
-      for (const tab of expired) tracked.delete(tab.id);
-      await writeRenewalTabIds(tracked);
-      console.log(`[KimiRelay] 清理 ${expired.length} 个超期续期残留页`);
-    }
-    return alive;
+      // 剪除跟踪表死条目前逐条核实：URL 过滤查询未命中 ≠ 标签页已关闭
+      // （导航中/被 discard 的瞬态会漏查），误剪会让「hash 被 SPA 路由抹掉」的续期页
+      // 永久脱离跟踪（残留不关闭的泄漏根因）。页还在但已导航离开 kimi.com 的，
+      // 超过存活期后同样回收，避免跟踪表无限悬挂。
+      let pruned = false;
+      for (const [id, createdAt] of tracked) {
+        if (liveIds.has(id)) continue;
+        try {
+          await chrome.tabs.get(id);
+          if (!skipAgeOut && now - createdAt > RENEWAL_TAB_MAX_AGE_MS) {
+            try { await chrome.tabs.remove(id); } catch { /* 页可能刚好被用户关闭 */ }
+            tracked.delete(id);
+            pruned = true;
+          }
+        } catch {
+          // tabs.get 抛错 = 标签页确认已关闭，剪除
+          tracked.delete(id);
+          pruned = true;
+        }
+      }
+      if (adopted.length > 0 || pruned) await writeRenewalTabIds(tracked);
+      if (!skipAgeOut && expired.length > 0) {
+        // 产品决策：无论激活与否一律清理（同 closeRenewalTabs）
+        for (const tab of expired) {
+          try { await chrome.tabs.remove(tab.id); } catch { /* ignore */ }
+        }
+        for (const tab of expired) tracked.delete(tab.id);
+        await writeRenewalTabIds(tracked);
+        console.log(`[KimiRelay] 清理 ${expired.length} 个超期续期残留页`);
+      }
+      return alive;
+    });
   } catch {
     return [];
   }
+}
+
+/**
+ * 续期页周期清扫（供 background healthCheck alarm 调用）：
+ * 独立于 relay 链强制执行超期回收——镜像收敛后 relay 不再进入续期分支，
+ * 仅靠 ensureRenewalTab 的顺带清扫会让残留续期页永远等不到回收时机
+ */
+export async function sweepRenewalTabs() {
+  await listMarkedRenewalTabs();
 }
 
 /** Kimi 后台开页续期开关（popup 设置页 kimiAutoRefresh）：关闭时不创建后台 kimi.com 标签页。
@@ -364,7 +439,7 @@ async function ensureRenewalTab(forceRenewal = false) {
 
     if (idle) {
       const tracked = await readRenewalTabIds();
-      const createdAt = tracked.get(idle.id) ?? 0;
+      const createdAt = tracked?.get(idle.id) ?? 0;
       if (now - createdAt < RENEWAL_TAB_MIN_CREATE_GAP_MS) {
         // 刚创建的页正在加载，避免并发 401 双请求触发创建后立即重载的抖动
         return;
@@ -392,9 +467,14 @@ async function ensureRenewalTab(forceRenewal = false) {
     await closeRenewalTabs();
     try {
       const tab = await chrome.tabs.create({ url: RENEWAL_TAB_URL, active: false, pinned: true });
-      const tracked = await readRenewalTabIds();
-      tracked.set(tab.id, Date.now());
-      await writeRenewalTabIds(tracked);
+      // onUpdated 提交期捕获通常已抢先入表；此处兜底写入必须持锁，
+      // 防止用旧快照覆盖并发登记的记录
+      await withRenewalTabsLock(async () => {
+        const tracked = await readRenewalTabIds();
+        if (!tracked) return;
+        tracked.set(tab.id, Date.now());
+        await writeRenewalTabIds(tracked);
+      });
       console.log(`[KimiRelay] 已创建续期后台页 ${tab.id}，页面换发令牌后经镜像收敛`);
     } catch (err) {
       console.error('[KimiRelay] 创建续期后台页失败:', err.message);
@@ -447,9 +527,10 @@ export async function checkKimiRelayValidity() {
 export async function getKimiAccessToken({ forceRenewal = false } = {}) {
   const record = await loadKimiTokenRelay();
 
-  // 镜像新鲜：直接供应；续期使命已完成，幂等关闭续期页（无续期页时零开销）
+  // 镜像新鲜：直接供应；续期使命已完成，幂等关闭续期页（无续期页时零开销）。
+  // 同样必须 await：SW 回收会截断 fire-and-forget 关页链（同 saveKimiTokenRelay）
   if (isFreshRecord(record)) {
-    void closeRenewalTabs();
+    await closeRenewalTabs();
     return record.accessToken;
   }
 

@@ -39,7 +39,7 @@ import {
 	loadCredentialViaBackgroundTab,
 	recordRefresh,
 } from './lib/credential.js';
-import { saveKimiTokenRelay, getKimiAccessToken, invalidateKimiTokenRelay, setOnTokenRenewedHook } from './lib/kimi-relay.js';
+import { saveKimiTokenRelay, getKimiAccessToken, invalidateKimiTokenRelay, setOnTokenRenewedHook, sweepRenewalTabs } from './lib/kimi-relay.js';
 import { relayData } from './lib/relay.js';
 
 // 新 Kimi 令牌经镜像入库（页面换发 / 续期页收敛）时：广播 COOKIE_CHANGED 让打开的
@@ -270,6 +270,8 @@ chrome.runtime.onStartup.addListener(() => init());
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'healthCheck') {
+    // 续期页周期清扫：与 relay 链解耦，保证超期残留续期页必定被回收
+    sweepRenewalTabs().catch(() => { /* 清扫失败由下一轮 alarm 兜底 */ });
     if (!BRIDGE.activePort) {
       discoverPortAndBroadcast().then((found) => {
         if (found) {

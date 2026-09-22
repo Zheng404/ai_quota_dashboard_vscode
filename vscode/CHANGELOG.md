@@ -2,6 +2,18 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.1.8] - 2026-09-22
+
+### 浏览器扩展
+
+- **修复续期后台页偶发残留不关闭**（根因级修复）
+  - 根因 ① MV3 Service Worker 回收截断关页链：令牌收敛后的关页动作原为 fire-and-forget（`void closeRenewalTabs()`），SW 在消息应答后被回收会截断 `query→storage→remove` 异步链，页面残留。两处关页调用全部改为 `await`
+  - 根因 ② 续期页「失联」：续期页 URL 的 `#aqd-renewal` hash 会被 kimi.com SPA 经 history API 抹掉，此后识别完全依赖 tabId 跟踪表；而跟踪表读-改-写无锁，并发 sweep/关页/开页之间后写者用旧快照覆盖，会把刚登记的记录抹掉——hash 已没的续期页对所有清理路径永久不可见（典型症状：配额数据正常显示，页面超过 15 分钟存活上限仍不关闭）
+  - 修复：`chrome.tabs.onUpdated` 导航提交期捕获续期页——提交时 hash 必然存在，抢在 SPA 抹除前登记 tabId（复用已有 tabs 权限，不新增权限）；跟踪表全部读-改-写纳入模块级互斥锁；跟踪表读写失败由静默改为 `console.warn` 告警；读取失败时不再按空表写回（防误抹既有记录）
+  - 新增 `sweepRenewalTabs()` 周期清扫：由 healthCheck alarm（≤60s）强制执行 15 分钟龄回收，与 relay 链解耦——镜像收敛后 relay 不再进入续期分支，此前残留页永远等不到回收时机
+  - 剪枝加固：跟踪表死条目剪除前经 `chrome.tabs.get` 逐条核实（URL 过滤查询瞬态漏查 ≠ 页已关闭）；页还在但已导航离开 kimi.com 的残留页超龄同样回收，跟踪表不再无限悬挂
+  - 提示：旧版本已失联的残留 pinned kimi.com 页需手动关闭一次，之后不再产生
+
 ## [1.1.7] - 2026-09-21
 
 ### 浏览器扩展
