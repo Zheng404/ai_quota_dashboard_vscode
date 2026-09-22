@@ -13,6 +13,7 @@
     "cookies",
     "storage",
     "alarms",
+    "idle",
     "tabs",
     "scripting"
   ],

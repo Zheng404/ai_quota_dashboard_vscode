@@ -35,6 +35,11 @@ export interface UsagePoint {
 	at: number;
 	tokens?: number;
 	calls?: number;
+	/**
+	 * 数值语义标记：'percent' = 0-100 百分比（主槽无绝对量时，如 GLM TOKENS_LIMIT），
+	 * 'tokens' = 绝对 Token 数。存量历史点无此字段（语义未知），读取时容忍、不回写迁移。
+	 */
+	kind?: 'percent' | 'tokens';
 }
 
 export interface ServiceData {

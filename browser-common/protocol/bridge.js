@@ -1,9 +1,9 @@
 /**
  * Data Bridge 推送 payload 构造与校验 — 单一可信源
  *
- * 浏览器端直接 import；VSCode 端 server.ts 消费镜像函数
- * `vscode/src/bridge/constants.ts` 的 `hasBridgeData`（由
- * `vscode/src/bridge/protocol.test.ts` 契约测试锁定行为一致）。
+ * 浏览器端直接 import；VSCode 端 server.ts 同样 runtime 直 import 本模块
+ * （esbuild 内联 JS + tsc 走 index.d.ts 类型出口），由
+ * `vscode/src/bridge/protocol.test.ts` 契约测试锁定行为一致。
  */
 
 import { BRIDGE_SOURCE } from './constants.js';

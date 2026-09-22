@@ -1,9 +1,9 @@
 /**
  * Data Bridge 协议共享层 — VSCode 侧类型来源
  *
- * 运行时实现见同目录 JS（浏览器端直接消费）；VSCode 端因 tsc rootDir 限制
- * 暂以 type-only import 消费本声明文件（无 emit 产物），运行时常量由
- * `vscode/src/bridge/constants.ts` 镜像，契约测试守卫逐值等价。
+ * 运行时实现见同目录 JS（浏览器端直接消费）；VSCode 端 runtime 直 import 同目录
+ * JS（esbuild 打包时内联），本声明文件为 tsc 类型检查的类型出口，
+ * 由 `vscode/src/bridge/protocol.test.ts` 契约测试守卫基线值等价。
  */
 
 /** 浏览器扩展推送的配额数据条目（serviceData 即 api/*.js fetcher 的返回值） */

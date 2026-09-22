@@ -40,6 +40,16 @@ export class StatusBar {
 		this.cache.set(data.id, data);
 	}
 
+	/** 移除指定服务的缓存与状态栏项（服务被删除时清理，避免渲染幽灵数据；不存在则静默返回） */
+	remove(id: string) {
+		this.cache.delete(id);
+		const item = this.items.get(id);
+		if (item) {
+			item.dispose();
+			this.items.delete(id);
+		}
+	}
+
 	/** 统一渲染一次 */
 	flush() {
 		this.render();

@@ -261,6 +261,10 @@ export class DataBridgeServer {
 		if (this.server) {
 			const server = this.server;
 			this.server = null;
+			// 主动断开所有已建立的 keep-alive 空闲连接：server.close() 只停止接受新连接，
+			// close 回调需等 Node 默认 keepAliveTimeout（5s）才能触发，会拖慢 deactivate。
+			// closeAllConnections 为 Node >=18.2 API，18.0/18.1 用可选链兜底
+			server.closeAllConnections?.();
 			await new Promise<void>((resolve) => {
 				server.close((err) => {
 					if (err) {

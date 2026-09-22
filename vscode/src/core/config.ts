@@ -15,6 +15,22 @@ export class ConfigValidationError extends Error {
 	}
 }
 
+/**
+ * 写操作互斥（模块级串行 Promise 链，进程内所有 ConfigManager 实例共享）。
+ * 全部「读-改-写」整表覆写方法（addService/removeService/updateService/
+ * updateServiceDataSource/updateServiceKind/saveServiceAtomic/migrateBridgeDataSource）
+ * 经此串行执行：并发调用方（refreshQueue 与 bridgeQueue 两条独立队列互相并发）
+ * 若各自 load→modify→save，后写者会用旧快照覆盖先写者造成丢失更新。
+ * 读方法不加锁，保持并发读取性能。
+ */
+let writeMutex: Promise<void> = Promise.resolve();
+
+function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+	const run = writeMutex.then(fn, fn);
+	writeMutex = run.then(() => undefined, () => undefined);
+	return run;
+}
+
 /** saveServiceAtomic 的目标状态参数（先计算最终态，再两次写入落盘） */
 export interface SaveServiceTarget {
 	displayName: string;
@@ -176,19 +192,23 @@ export class ConfigManager {
 
 	async addService(kind: ServiceId, displayName: string): Promise<string> {
 		this.validateDisplayName(displayName);
-		const profiles = this.loadProfiles();
-		const id = `${kind}-${Date.now()}-${this.nextId++}`;
-		const dataSource = kind === 'bridge' ? 'bridge' : 'manual';
-		profiles.push({ id, kind, displayName: displayName.trim(), dataSource });
-		await this.saveProfiles(profiles);
-		return id;
+		return withWriteLock(async () => {
+			const profiles = this.loadProfiles();
+			const id = `${kind}-${Date.now()}-${this.nextId++}`;
+			const dataSource = kind === 'bridge' ? 'bridge' : 'manual';
+			profiles.push({ id, kind, displayName: displayName.trim(), dataSource });
+			await this.saveProfiles(profiles);
+			return id;
+		});
 	}
 
 	/** 删除服务实例 */
 	async removeService(id: string): Promise<void> {
-		const profiles = this.loadProfiles().filter(p => p.id !== id);
-		await this.saveProfiles(profiles);
-		await this.setKey(id, '');
+		return withWriteLock(async () => {
+			const profiles = this.loadProfiles().filter(p => p.id !== id);
+			await this.saveProfiles(profiles);
+			await this.setKey(id, '');
+		});
 	}
 
 	/** 更新服务实例属性 */
@@ -197,12 +217,14 @@ export class ConfigManager {
 			this.validateDisplayName(updates.displayName);
 			updates.displayName = updates.displayName.trim();
 		}
-		const profiles = this.loadProfiles();
-		const p = profiles.find(x => x.id === id);
-		if (!p) { return; }
-		if (updates.displayName !== undefined) { p.displayName = updates.displayName; }
-		if (updates.endpoint !== undefined) { p.endpoint = updates.endpoint; }
-		await this.saveProfiles(profiles);
+		return withWriteLock(async () => {
+			const profiles = this.loadProfiles();
+			const p = profiles.find(x => x.id === id);
+			if (!p) { return; }
+			if (updates.displayName !== undefined) { p.displayName = updates.displayName; }
+			if (updates.endpoint !== undefined) { p.endpoint = updates.endpoint; }
+			await this.saveProfiles(profiles);
+		});
 	}
 
 	/** 更新服务 API Key */
@@ -212,21 +234,25 @@ export class ConfigManager {
 
 	/** 更新服务数据来源 */
 	async updateServiceDataSource(id: string, dataSource: 'manual' | 'bridge'): Promise<void> {
-		const profiles = this.loadProfiles();
-		const p = profiles.find(x => x.id === id);
-		if (!p) { return; }
-		p.dataSource = dataSource;
-		await this.saveProfiles(profiles);
+		return withWriteLock(async () => {
+			const profiles = this.loadProfiles();
+			const p = profiles.find(x => x.id === id);
+			if (!p) { return; }
+			p.dataSource = dataSource;
+			await this.saveProfiles(profiles);
+		});
 	}
 
 	/** 更新服务类型（同时清空 key） */
 	async updateServiceKind(id: string, kind: ServiceId): Promise<void> {
-		const profiles = this.loadProfiles();
-		const p = profiles.find(x => x.id === id);
-		if (!p) { return; }
-		p.kind = kind;
-		await this.saveProfiles(profiles);
-		await this.setKey(id, '');
+		return withWriteLock(async () => {
+			const profiles = this.loadProfiles();
+			const p = profiles.find(x => x.id === id);
+			if (!p) { return; }
+			p.kind = kind;
+			await this.saveProfiles(profiles);
+			await this.setKey(id, '');
+		});
 	}
 
 	/**
@@ -245,38 +271,40 @@ export class ConfigManager {
 	 */
 	async saveServiceAtomic(id: string, target: SaveServiceTarget): Promise<void> {
 		this.validateDisplayName(target.displayName);
-		const profiles = this.loadProfiles();
-		const p = profiles.find(x => x.id === id);
-		const kindChanged = !!p && p.kind !== target.kind;
-		const dataSourceChanged = !!p && p.dataSource !== target.dataSource;
+		return withWriteLock(async () => {
+			const profiles = this.loadProfiles();
+			const p = profiles.find(x => x.id === id);
+			const kindChanged = !!p && p.kind !== target.kind;
+			const dataSourceChanged = !!p && p.dataSource !== target.dataSource;
 
-		// ---- 计算最终 Secret 内容（与旧多步写入的最终态等价）----
-		// undefined = 不触碰现有 Secret；'' = 删除；非空 = 存储
-		let finalSecret: string | undefined;
-		if (target.dataSource === 'manual') {
-			// manual 模式总是覆盖写入用户输入的 key（空则删除），与旧逻辑一致
-			finalSecret = target.key;
-		} else if (target.kind === 'bridge') {
-			// Bridge 服务自身：保留 'connected' key 语义，仅在 kind/数据来源变化时清空
-			finalSecret = (kindChanged || dataSourceChanged) ? '' : undefined;
-		} else {
-			// Data Bridge 数据源的 AI 服务：数据由浏览器扩展推送，本端不消费凭证，
-			// 总是清除 Secret key（含旧版本遗留的推送凭证）
-			finalSecret = '';
-		}
+			// ---- 计算最终 Secret 内容（与旧多步写入的最终态等价）----
+			// undefined = 不触碰现有 Secret；'' = 删除；非空 = 存储
+			let finalSecret: string | undefined;
+			if (target.dataSource === 'manual') {
+				// manual 模式总是覆盖写入用户输入的 key（空则删除），与旧逻辑一致
+				finalSecret = target.key;
+			} else if (target.kind === 'bridge') {
+				// Bridge 服务自身：保留 'connected' key 语义，仅在 kind/数据来源变化时清空
+				finalSecret = (kindChanged || dataSourceChanged) ? '' : undefined;
+			} else {
+				// Data Bridge 数据源的 AI 服务：数据由浏览器扩展推送，本端不消费凭证，
+				// 总是清除 Secret key（含旧版本遗留的推送凭证）
+				finalSecret = '';
+			}
 
-		// ---- 第一次写入：Secret（失败则抛出，state 不落，旧配置保持可用）----
-		if (finalSecret !== undefined) {
-			await this.setKey(id, finalSecret);
-		}
+			// ---- 第一次写入：Secret（失败则抛出，state 不落，旧配置保持可用）----
+			if (finalSecret !== undefined) {
+				await this.setKey(id, finalSecret);
+			}
 
-		// ---- 第二次写入：globalState（displayName/kind/dataSource 一次性落盘）----
-		if (p && (kindChanged || dataSourceChanged || p.displayName !== target.displayName.trim())) {
-			p.displayName = target.displayName.trim();
-			p.kind = target.kind;
-			p.dataSource = target.dataSource;
-			await this.saveProfiles(profiles);
-		}
+			// ---- 第二次写入：globalState（displayName/kind/dataSource 一次性落盘）----
+			if (p && (kindChanged || dataSourceChanged || p.displayName !== target.displayName.trim())) {
+				p.displayName = target.displayName.trim();
+				p.kind = target.kind;
+				p.dataSource = target.dataSource;
+				await this.saveProfiles(profiles);
+			}
+		});
 	}
 
 	// ==================== 全局设置 ====================
@@ -311,18 +339,20 @@ export class ConfigManager {
 
 	/** 设置所有 bridge 模式服务的数据来源（用于新架构下默认启用 bridge） */
 	async migrateBridgeDataSource(): Promise<void> {
-		const profiles = this.loadProfiles();
-		let changed = false;
-		for (const p of profiles) {
-			// 旧数据可能没有 dataSource 字段，默认视为 manual 保持兼容
-			if (!p.dataSource) {
-				p.dataSource = 'manual';
-				changed = true;
+		return withWriteLock(async () => {
+			const profiles = this.loadProfiles();
+			let changed = false;
+			for (const p of profiles) {
+				// 旧数据可能没有 dataSource 字段，默认视为 manual 保持兼容
+				if (!p.dataSource) {
+					p.dataSource = 'manual';
+					changed = true;
+				}
 			}
-		}
-		if (changed) {
-			await this.saveProfiles(profiles);
-		}
+			if (changed) {
+				await this.saveProfiles(profiles);
+			}
+		});
 	}
 }
 

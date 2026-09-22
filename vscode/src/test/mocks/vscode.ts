@@ -9,6 +9,17 @@ export const settingsStore: Record<string, unknown> = {};
 export const ThemeColor = class {
 	constructor(public id: string) {}
 };
+export const StatusBarAlignment = {
+	Left: 0,
+	Right: 1,
+};
+export class MarkdownString {
+	isTrusted = false;
+	supportHtml = false;
+	constructor(public value?: string, public supportThemeIcons?: boolean) {}
+	appendMarkdown(_markdown: string): MarkdownString { return this; }
+	appendText(_text: string): MarkdownString { return this; }
+}
 export const window = {
 	createStatusBarItem: () => ({
 		text: '',

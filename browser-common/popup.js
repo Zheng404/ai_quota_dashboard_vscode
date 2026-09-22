@@ -169,7 +169,7 @@ function renderSettingsServices() {
 						<div class="svc-toggle-row">
 							<input type="checkbox" id="${svc.kind}-auto-refresh-${svc.id}" ${config.settings[svc.kind + 'AutoRefresh'] ? 'checked' : ''}>
 							<label for="${svc.kind}-auto-refresh-${svc.id}">
-								浏览器重启后自动后台访问 ${SERVICE_LABELS[svc.kind]} 刷新凭证
+								无 ${SERVICE_LABELS[svc.kind]} 标签页时自动后台续期凭证
 							</label>
 						</div>
 						<button class="btn btn-sm btn-secondary open-site-btn" data-service-id="${svc.id}" data-kind="${svc.kind}">${icon('external-link', 12)}打开 ${SERVICE_LABELS[svc.kind]} 网站</button>

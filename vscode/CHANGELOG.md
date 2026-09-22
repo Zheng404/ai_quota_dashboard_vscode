@@ -2,6 +2,37 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.2.0] - 2026-09-22
+
+### 浏览器扩展
+
+- **闲置门控**：基于 `chrome.idle`——系统空闲/锁屏时不再创建续期页（冻结态下页面无法换发令牌，开页纯属垃圾），进入空闲/锁屏时立即关闭在跑的续期页，恢复 active 后由后续周期按需重开。修复「后台长时间不操作时续期页打开后不关闭」；双端 manifest 新增 `idle` 权限（无警告，存量用户更新无感知）
+- **续期令牌入库并发锁**：`saveKimiTokenRelay` 的读-比较-写临界区纳入互斥锁，多标签页毫秒级交错上报不再可能让镜像倒退
+- **修复 `kimiAutoRefresh` 默认值链路矛盾**：`config.js` 字面默认 `false` 与判定语义 `!== false`（默认开）互相矛盾，且 `saveConfig()` 会把 false 固化落盘导致新用户添加 Kimi 服务后续期被静默禁用、401 自愈链同被拦截——默认值统一为 `true`，popup 开关文案同步更新为「无 kimi.com 标签页时自动后台续期」
+- **删除 MiMo 缓存凭证探测死路径**：`probeCachedCredential` 手动设 `Cookie` 头会被浏览器静默丢弃（forbidden header），探测 100% 按未登录应答并误删可能仍有效的缓存凭证——整体删除，`missing` 时直接走后台刷新链；随之死透的 `loadCredentialCache`/`clearCredentialCache` 一并删除
+- **Kimi 网页路径解析对齐**：`readFreshRelayToken` 新鲜度判定改为与 kimi-relay 相同的 JWT exp 口径（死令牌不再被 popup 首屏直读采用）；三处 + 兜底分支共四处裸 `new Date(resetTime)` 统一走 `toResetTimestamp`（秒/毫秒/ISO 三态兼容）；`parseWindowSlot` 不再盲取 `limits[0]`，改为与 Code API 路径相同的「精确匹配 5h 窗口 + 最短窗口兜底」
+- **GLM 凭证探测修正**：5xx 等非 401 失败不再误报 `valid`（判 `unknown`）；GLM API Key 读取收敛为 `api/glm.js` 单一可信源（探测侧同步获得 dashboardConfig 自愈重播种，消除「探测报 missing 但拉数正常」的状态割裂）
+- **重传队列加固**：`retryPending` 失败路径补持久化（重试计数不再因 SW 重启归零导致 3 次上限永不达成）；`loadPending` 冷启动加 gate，消除恢复挂起期间事件插队覆盖存储、旧队列条目丢失的竞态
+- **交互与数据流修复**：popup 保存按钮不再因 `CONFIG_UPDATED` 同步端口探测而最长阻塞 ~22s（改非阻塞应答）；独立仪表盘默认注入的服务 `saveConfig()` 落盘（修复「页面有卡但 Data Bridge 不推送」）；`templates.js` 对非字符串 `toolName` 加防护（单卡坏数据不再拖垮整页渲染）；`ensureCookiePermission` 删除不可达的 `permissions.request` 死分支
+- **protocol 注释债务**：三处头注释更新为当前事实（`vscode/src/bridge/constants.ts` 镜像已删除，VSCode 侧 runtime 直 import + tsc 走 index.d.ts 类型出口）
+
+### VSCode 端
+
+- **设置页输入不再被轮询冲掉**：services/global 面板改为按数据指纹条件重渲染（指纹变化才重渲染）+ 编辑中守卫（焦点在面板输入控件内则跳过本轮）；tab 切换强制刷新一次。修复「粘贴 API Key 期间被 60s 轮询重置」的输入丢失
+- **Bridge 删除服务幽灵数据清理**：`removeServiceAndCleanup` 升为唯一删除路径（`serviceData`/`bridgeDataStore`/Secret/状态栏一并清理），`syncRemoveBridgeServices`/`deduplicateAiProfiles` 复用同一路径；`StatusBar` 新增 `remove(id)` API；`doPullAll` 尾部按 profiles 差集兜底清理
+- **配置写并发互斥**：`ConfigManager` 全部读-改-写方法纳入进程级串行锁，消除 bridge 推送（bridgeQueue）与设置页保存（refreshQueue）并发交错的 lost update（用户配置不再被静默抹掉）
+- **交互修正**：webview 内手动刷新不再被 AFK 误判「用户离开中」拒绝（人工触发即活动证据）；注册 `onDidChangeConfiguration`，Settings UI 直改 `aiQuotaDashboard.*` 立即生效（轮询定时器热重启）
+- **历史数据语义**：`UsagePoint` 显式区分 `percent`/`tokens`（GLM 百分比与绝对量不再混用同一字段）；按日期去重从 UTC 改为本地日期（东八区 0-8 点不再归属前一日）；`pullService` 补传 profiles 与 doPullAll 口径对齐
+- **网络健壮性**：`fetch.ts` 增加总时长上限（默认 30s，慢速 drip 响应不再卡死轮询循环）+ 响应体 5MB 上限；Bridge server dispose 切断 keep-alive 空闲连接（停机不再等 5s）
+- **防御加固**：`handleDataPayload` 过滤 `[null]` 异常元素（整轮处理不再被拖垮但仍回 200）；`loadHistory` 对写坏的 globalState 返回空 Map；`normalizeBridgeServiceData` 逐 slot 校验 percent 有限数与 label；`requestDetailRange` 在 existing 缺失时构造最小骨架写入（详情结果不再被静默丢弃、前端不再永远 loading）
+- **编排层提取重构**：`handleDataPayload` 处理核心提取为 `src/bridge/payload-handler.ts`（副作用经 BridgeRuntime 接口注入，可独立测试），extension.ts 瘦身为接线层
+
+### 工程
+
+- **测试**：145 → **170**（+25：payload-handler 编排集成 6、config 写互斥 3、fetch 超时/上限 4、statusbar `remove` 3、persistence 语义打标与本地日期去重 6、server dispose 1、afk 2）；webview 前端 DOM 测试因需新增 jsdom 类依赖暂缓
+- **tsconfig 拆分**：extension 程序（`tsconfig.json`，无 DOM lib）与 webview 程序（`tsconfig.webview.json`，含 DOM）分离——extension 侧误用 `localStorage`/`document` 等浏览器 API 编译期即报错（已实证 TS2304）
+- **SECURITY.md**：记录「webview 设置页回显完整 API Key」为已知接受风险（CSP 下无第三方注入面；掩码回显方案待需求驱动）
+
 ## [1.1.8] - 2026-09-22
 
 ### 浏览器扩展

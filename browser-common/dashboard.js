@@ -145,17 +145,25 @@ async function handleAddGlm() {
 
 async function init() {
 	await loadConfig();
+	let defaultsInjected = false;
 	// 独立仪表盘默认包含 kimi + mimo（仅在无已配置服务时）
 	if (config.services.length === 0) {
 		config.services = [
 			{ id: 'kimi', kind: 'kimi', name: 'Kimi', enabled: true },
 			{ id: 'mimo', kind: 'mimo', name: 'MiMo', enabled: true },
 		];
+		defaultsInjected = true;
 	}
 	// 确保 GLM 服务项存在（当有 API Key 时自动添加）
 	const hasGlm = config.services.some(s => s.kind === 'glm');
 	if (!hasGlm && config.glmApiKey) {
 		config.services.push({ id: 'glm', kind: 'glm', name: 'GLM', enabled: true });
+		defaultsInjected = true;
+	}
+	// 默认注入必须落盘：background 的 activeKinds 来自持久化配置，
+	// 仅改内存会导致 Data Bridge 收不到活跃服务、不推送配额数据
+	if (defaultsInjected) {
+		await saveConfig();
 	}
 	await ui.loadAll();
 	ui.scheduleRefresh();

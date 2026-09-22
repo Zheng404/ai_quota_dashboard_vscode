@@ -219,3 +219,26 @@ describe('DataBridgeServer（真实 HTTP 直连）', () => {
 		expect(received.length).toBe(before);
 	});
 });
+
+describe('DataBridgeServer dispose 停机速度', () => {
+	it('存在 keep-alive 空闲连接时 dispose 立即返回，不等待 Node 默认 keepAliveTimeout(5s)', async () => {
+		const server = new DataBridgeServer(() => {});
+		const port = await server.start(await findFreePort());
+
+		// keep-alive agent 发起一次 /health，响应结束后 socket 留在客户端空闲池中
+		const agent = new http.Agent({ keepAlive: true });
+		const health = await request(mkOpts(port, {
+			path: '/health',
+			method: 'GET',
+			headers: { 'X-Bridge-Probe': PROBE_SECRET },
+			agent,
+		}));
+		expect(health.status).toBe(200);
+
+		const t0 = Date.now();
+		await server.dispose();
+		// 若未调用 closeAllConnections，close 回调需等 keepAliveTimeout（默认 5s）才触发
+		expect(Date.now() - t0).toBeLessThan(4000);
+		agent.destroy();
+	});
+});

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { AfkDetector } from './afk';
 
 describe('AfkDetector', () => {
@@ -25,4 +25,34 @@ describe('AfkDetector', () => {
 		const detector = new AfkDetector();
 		expect(detector.checkAfk(-1)).toBe(false);
 	});
+
+	it('updateActivity 重置 AFK 计时（模拟手动刷新先上报活动）', () => {
+		vi.useFakeTimers();
+		try {
+			const detector = new AfkDetector();
+			vi.advanceTimersByTime(3700 * 1000); // 超过默认 3600s 阈值
+			expect(detector.checkAfk(3600)).toBe(true);
+			detector.updateActivity(); // 人工触发即活动证据
+			expect(detector.checkAfk(3600)).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('updateActivity 在销毁后无效果', () => {
+		vi.useFakeTimers();
+		try {
+			const detector = new AfkDetector();
+			detector.dispose();
+			detector.updateActivity();
+			vi.advanceTimersByTime(3700 * 1000);
+			expect(detector.checkAfk(3600)).toBe(false); // disposed 恒返回 false，不抛错
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });

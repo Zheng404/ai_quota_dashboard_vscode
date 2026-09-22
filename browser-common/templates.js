@@ -238,7 +238,7 @@ function renderGlmToolDetail(usage, range) {
 	const summaryItems = usage.toolSummary.map(t =>
 		`<div class="glm-summary-item">`
 		+ `<span class="glm-summary-dot" style="background:${getToolColor(t.toolCode)};color:${getToolColor(t.toolCode)}"></span>`
-		+ `<span class="glm-summary-name">${escapeHtml(t.toolName.replace(/\s*MCP$/, ''))}</span>`
+		+ `<span class="glm-summary-name">${escapeHtml(String(t.toolName || '').replace(/\s*MCP$/, ''))}</span>`
 		+ `<span class="glm-summary-value">${t.totalUsageCount} 次</span>`
 		+ `</div>`
 	).join('');

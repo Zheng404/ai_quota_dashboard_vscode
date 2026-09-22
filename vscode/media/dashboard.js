@@ -471,12 +471,19 @@
       });
     });
   }
+  var lastUpdateMessage;
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
       btn.classList.add("active");
-      document.getElementById("panel-" + (btn.dataset.tab ?? ""))?.classList.add("active");
+      const tab = btn.dataset.tab ?? "dashboard";
+      document.getElementById("panel-" + tab)?.classList.add("active");
+      servicesPanelHash = "";
+      globalPanelHash = "";
+      if (lastUpdateMessage) {
+        handleUpdateData(lastUpdateMessage);
+      }
     });
   });
   document.addEventListener("click", (e) => {
@@ -491,9 +498,22 @@
       }
     }
   });
+  var servicesPanelHash = "";
+  var globalPanelHash = "";
+  function isEditingInPanel(panel) {
+    if (!panel) {
+      return false;
+    }
+    const ae = document.activeElement;
+    if (!(ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement || ae instanceof HTMLSelectElement)) {
+      return false;
+    }
+    return panel.contains(ae);
+  }
   function handleUpdateData(message) {
     const services = message.services;
     const settings = message.settings;
+    lastUpdateMessage = message;
     const dashboardPanel = document.getElementById("panel-dashboard");
     if (dashboardPanel) {
       const refreshingSet = new Set(message.refreshingIds ?? []);
@@ -535,14 +555,26 @@
           lastError: bd.lastError
         } : { connected: false, receivedKinds: [] };
       }
-      servicesPanel.innerHTML = renderServiceListSettings(settings, bridgeState);
-      bindServiceEvents();
-      bindAddService();
+      const servicesHash = JSON.stringify({
+        profiles: settings.profiles,
+        keys: settings.keys,
+        bridge: bridgeState
+      });
+      if (servicesHash !== servicesPanelHash && !isEditingInPanel(servicesPanel)) {
+        servicesPanel.innerHTML = renderServiceListSettings(settings, bridgeState);
+        servicesPanelHash = servicesHash;
+        bindServiceEvents();
+        bindAddService();
+      }
     }
     const globalPanel = document.getElementById("panel-global");
     if (globalPanel) {
-      globalPanel.innerHTML = renderGlobalSettings(settings);
-      bindGlobalEvents();
+      const globalHash = JSON.stringify(settings);
+      if (globalHash !== globalPanelHash && !isEditingInPanel(globalPanel)) {
+        globalPanel.innerHTML = renderGlobalSettings(settings);
+        globalPanelHash = globalHash;
+        bindGlobalEvents();
+      }
     }
   }
   window.addEventListener("message", (event) => {

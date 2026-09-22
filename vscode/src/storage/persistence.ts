@@ -14,8 +14,18 @@ interface StoredHistory {
 export function loadHistory(ctx: vscode.ExtensionContext): Map<string, UsagePoint[]> {
 	const raw = ctx.globalState.get<StoredHistory>(STORAGE_KEY, {});
 	const map = new Map<string, UsagePoint[]>();
-	for (const [sid, pts] of Object.entries(raw)) {
-		map.set(sid, pts);
+	// 防御：globalState 值被外部写坏为 null/数组等非纯对象时，Object.entries 会抛 TypeError 拖垮拉取流程
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+		console.warn('[AI Quota Dashboard] 历史数据存储格式非法，已按空历史处理');
+		return map;
+	}
+	try {
+		for (const [sid, pts] of Object.entries(raw)) {
+			map.set(sid, pts);
+		}
+	} catch (e) {
+		console.warn('[AI Quota Dashboard] 历史数据读取失败，已按空历史处理', e);
+		return new Map<string, UsagePoint[]>();
 	}
 	return map;
 }
@@ -40,17 +50,22 @@ export async function saveHistory(
 
 		const pts: UsagePoint[] = existing[sid] ?? [];
 
-		// 计算当前用量（取第一个 slot 的 used，无 used 时回退到 percent）
+		// 计算当前用量并打标语义：主槽有绝对量 used 记 'tokens'；
+		// 无 used 回退 percent 时记 'percent'（GLM TOKENS_LIMIT 曲线实际记录 0-100 百分比，
+		// 与 Kimi/MiMo 的绝对量不再混同语义）
 		const mainSlot = data.slots[0];
+		const pointKind: UsagePoint['kind'] = mainSlot?.used != null ? 'tokens' : 'percent';
 		const used = mainSlot?.used ?? mainSlot?.percent ?? 0;
 
-		// 添加新的数据点（如果和上一个不同）
+		// 添加新的数据点（值或语义与上一个不同则记录）
 		const last = pts[pts.length - 1];
-		if (!last || (last.tokens !== used && !(Number.isNaN(last.tokens) && Number.isNaN(used)))) {
+		if (!last || last.kind !== pointKind
+			|| (last.tokens !== used && !(Number.isNaN(last.tokens) && Number.isNaN(used)))) {
 			pts.push({
 				at: now,
 				tokens: used,
 				calls: 1,
+				kind: pointKind,
 			});
 		}
 
@@ -93,17 +108,18 @@ export function attachHistory(
 		return { ...data, history: savedHistory };
 	}
 
-	// 合并：按 UTC 日期去重，避免时区偏移导致重复或丢失
-	function dateKey(ts: number): string {
+	// 合并：按本地日期去重（东八区用户本地 0-8 点不再归属前一 UTC 日），
+	// 避免时区偏移导致重复或丢失
+	function toLocalDateKey(ts: number): string {
 		const d = new Date(ts);
-		return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+		return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 	}
 	const merged = new Map<string, UsagePoint>();
 	for (const p of savedHistory) {
-		merged.set(dateKey(p.at), p);
+		merged.set(toLocalDateKey(p.at), p);
 	}
 	for (const p of apiHistory) {
-		const dk = dateKey(p.at);
+		const dk = toLocalDateKey(p.at);
 		const existing = merged.get(dk);
 		// 如果已有数据且信息更完整（有 tokens 和 calls），保留已有的
 		if (existing?.tokens != null && existing.calls != null && (p.tokens == null || p.calls == null)) {

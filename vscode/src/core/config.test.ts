@@ -170,6 +170,70 @@ describe('写入收敛（只写 Settings，不再双写 globalState）', () => {
 	});
 });
 
+describe('写方法互斥（并发读-改-写无丢失更新）', () => {
+	/** 让 globalState.update 让出宏任务，制造「双方均已 load 旧快照」的最坏交错 */
+	function withDelayedUpdate(mock: MockContextShape): void {
+		const origUpdate = mock.globalState.update.bind(mock.globalState);
+		mock.globalState.update = async (key: string, value: unknown) => {
+			await new Promise(resolve => setTimeout(resolve, 0));
+			return origUpdate(key, value);
+		};
+	}
+
+	it('addService 与 removeService 并发交错：两个写最终都生效（添加不丢失）', async () => {
+		const mock = createMockContext();
+		withDelayedUpdate(mock);
+		const mgr = new ConfigManager(asCtx(mock));
+
+		let addedId = '';
+		const pAdd = mgr.addService('glm', 'A').then(id => { addedId = id; });
+		// removeService 对不存在 id 仍走「load 整表 → 覆写」，与 addService 构成交错竞争；
+		// 无互斥时后写者会用旧快照（[]）覆盖先写者的 [A]，导致添加丢失
+		const pRemove = mgr.removeService('ghost-1');
+		await Promise.all([pAdd, pRemove]);
+
+		const profiles = mgr.loadProfiles();
+		expect(profiles).toHaveLength(1);
+		expect(profiles[0]?.id).toBe(addedId);
+		expect(profiles[0]?.displayName).toBe('A');
+	});
+
+	it('两个并发 addService 都保留在最终列表中', async () => {
+		const mock = createMockContext();
+		withDelayedUpdate(mock);
+		const mgr = new ConfigManager(asCtx(mock));
+
+		const [idA, idB] = await Promise.all([
+			mgr.addService('glm', 'A'),
+			mgr.addService('kimi', 'B'),
+		]);
+
+		const ids = mgr.loadProfiles().map(p => p.id);
+		// 无互斥时两个调用都 load 到 []，后写者覆盖先写者，只保留一个
+		expect(ids).toHaveLength(2);
+		expect(ids).toContain(idA);
+		expect(ids).toContain(idB);
+	});
+
+	it('addService 与 saveServiceAtomic 并发：两次写入的字段都保留', async () => {
+		const mock = createMockContext({
+			services: [{ id: 'svc-1', kind: 'glm', displayName: 'Old', dataSource: 'manual' }],
+		});
+		withDelayedUpdate(mock);
+		const mgr = new ConfigManager(asCtx(mock));
+
+		let addedId = '';
+		const pAdd = mgr.addService('mimo', 'New').then(id => { addedId = id; });
+		const pSave = mgr.saveServiceAtomic('svc-1', { displayName: 'Renamed', kind: 'glm', dataSource: 'manual', key: 'k' });
+		await Promise.all([pAdd, pSave]);
+
+		const profiles = mgr.loadProfiles();
+		expect(profiles).toHaveLength(2);
+		expect(profiles.find(p => p.id === 'svc-1')?.displayName).toBe('Renamed');
+		expect(profiles.find(p => p.id === addedId)?.displayName).toBe('New');
+	});
+});
+
 describe('saveServiceAtomic（原子化保存）', () => {
 	it('manual 模式：profile 与 secret 均达到最终态', async () => {
 		const mock = createMockContext({

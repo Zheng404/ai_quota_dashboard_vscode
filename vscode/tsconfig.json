@@ -1,26 +1,19 @@
 {
+  // Extension 侧程序（Node 宿主）：无 DOM lib，误用 localStorage/document 等浏览器 API 编译期即报错。
+  // 注意：未采用 project references 聚合——已验证 `tsc -p ./`（compile 脚本）对纯 solution 配置
+  // 不会真正检查子项目（有错也 exit 0），故拆为两个独立程序，本文件为 compile 入口。
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "module": "commonjs",
-    "target": "ES2020",
-    "noEmit": true,
     "lib": [
-      "ES2020",
-      "DOM"
+      "ES2020"
     ],
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "types": ["node", "vscode"],
-    "forceConsistentCasingInFileNames": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "types": ["node", "vscode"]
   },
   "include": [
     "src/**/*"
   ],
   "exclude": [
+    "src/webview/**",
     "node_modules",
     ".vscode-test"
   ]

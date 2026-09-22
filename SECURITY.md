@@ -49,6 +49,10 @@
 
 ## 已知限制
 
+### Webview 设置页回显完整 API Key（接受风险）
+
+设置页需回显已配置的 API Key 供用户编辑（`getCurrentSettings` 读取全部 Secret 下发 webview，渲染进输入框 value）。评估结论为**接受的残余风险**：webview 受 CSP 保护（`script-src` 仅限 nonce 保护的 bundle，无第三方脚本注入面），同进程代码均可经 Secret Storage API 读取凭证，webview 回显并未扩大信任边界。若未来收紧，可改为掩码回显（`sk-abc...`）+ 留空保留原值的交互。此条已知悉并记录，非待修复缺陷。
+
 ### Data Bridge 认证机制说明
 
 Data Bridge 采用**双层 Token 认证**保护 `/health` 和 `/data` 端点。其防御目标是**恶意网页与其它浏览器扩展**（CSRF / 跨源访问 / DNS rebinding），**不防御本地恶意进程**——本地回环信任模型需要用户知悉：
@@ -101,7 +105,7 @@ Data Bridge 采用**双层 Token 认证**保护 `/health` 和 `/data` 端点。�
 
 ### 数据保留
 
-- **历史数据**：最多保留 30 天，按 UTC 日期去重，超期自动清理
+- **历史数据**：最多保留 30 天，按本地日期去重，超期自动清理
 - **配置数据**：保留至用户主动删除或卸载扩展
 - **Cookie / API Key**：保留至用户切换为手动模式或删除服务；`manual` 来源凭证由用户本地保管，Data Bridge 架构下浏览器凭证不出浏览器、VSCode 端 bridge 数据源服务不存储任何凭证
 
@@ -114,4 +118,4 @@ Data Bridge 采用**双层 Token 认证**保护 `/health` 和 `/data` 端点。�
 
 ---
 
-最后更新：2026-09-05
+最后更新：2026-09-22

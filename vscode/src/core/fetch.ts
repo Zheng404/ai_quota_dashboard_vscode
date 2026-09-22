@@ -2,8 +2,10 @@ import * as http from 'http';
 import * as https from 'https';
 import { URL } from 'url';
 
-/** 默认请求超时 (ms) */
+/** 默认请求总时长上限 (ms) */
 const DEFAULT_TIMEOUT = 30000;
+/** 默认响应体大小上限 (5MB) */
+const DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 /** 默认重试次数 */
 const DEFAULT_RETRIES = 0;
 /** 默认重试延迟基数 (ms) */
@@ -14,7 +16,10 @@ export interface HttpRequestOptions {
 	url: string;
 	headers?: Record<string, string>;
 	body?: string;
+	/** 请求总时长上限 ms（默认 30000）：慢速 drip 响应（chunk 间隔短但总时长超限）也会被中止 */
 	timeout?: number;
+	/** 响应体大小上限字节（默认 5MB），超出即中止请求，防异常大响应撑爆内存 */
+	maxResponseBytes?: number;
 	/** 重试次数（默认 0） */
 	retries?: number;
 	/** 重试延迟基数 ms（默认 1000，指数退避） */
@@ -61,6 +66,17 @@ function doRequest<T>(options: HttpRequestOptions): Promise<DoRequestResult<T>> 
 		const u = new URL(options.url);
 		const isSecure = u.protocol === 'https:';
 		const requestFn = isSecure ? https.request : http.request;
+		const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT;
+		const maxBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+		// 统一结算闸门：超时/错误/正常结束都经 finish() 保证只结算一次并清理总时长定时器。
+		// totalTimer 在 finish 之后以 const 声明：所有回调均为异步触发，执行到声明行后才会被调用，无 TDZ 风险
+		let settled = false;
+		const finish = (fn: () => void): void => {
+			if (settled) { return; }
+			settled = true;
+			clearTimeout(totalTimer);
+			fn();
+		};
 		const req = requestFn(
 			{
 				hostname: u.hostname,
@@ -71,8 +87,18 @@ function doRequest<T>(options: HttpRequestOptions): Promise<DoRequestResult<T>> 
 			},
 			(res) => {
 				const chunks: Buffer[] = [];
-				res.on('error', (err) => reject(createHttpError(err.message, res.statusCode ?? undefined, options.url)));
+				let receivedBytes = 0;
+				res.on('error', (err) => finish(() => reject(createHttpError(err.message, res.statusCode ?? undefined, options.url))));
 				res.on('data', (chunk) => {
+					// 响应体累计超限：中止连接，避免异常大响应撑爆内存
+					receivedBytes += (chunk as Buffer).length;
+					if (receivedBytes > maxBytes) {
+						finish(() => {
+							req.destroy();
+							reject(createHttpError(`响应体超过大小限制(${maxBytes}B): ${u.hostname}${u.pathname}`, undefined, options.url));
+						});
+						return;
+					}
 					if (Buffer.isBuffer(chunk) || typeof chunk === 'string') {
 						chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf-8'));
 					} else if (chunk instanceof Uint8Array) {
@@ -80,7 +106,7 @@ function doRequest<T>(options: HttpRequestOptions): Promise<DoRequestResult<T>> 
 					}
 					// Ignore other types to avoid silent data corruption
 				});
-			res.on('end', () => {
+			res.on('end', () => finish(() => {
 				const body = Buffer.concat(chunks).toString('utf-8');
 				const contentType = res.headers['content-type'] ?? '';
 
@@ -102,14 +128,18 @@ function doRequest<T>(options: HttpRequestOptions): Promise<DoRequestResult<T>> 
 						body.slice(0, 500),
 					));
 				}
-			});
+			}));
 			},
 		);
-		req.on('error', (err) => reject(createHttpError(err.message, undefined, options.url)));
-		req.setTimeout(options.timeout ?? DEFAULT_TIMEOUT, () => {
-			req.destroy();
-			reject(createHttpError(`请求超时: ${u.hostname}${u.pathname}`, undefined, options.url));
-		});
+		req.on('error', (err) => finish(() => reject(createHttpError(err.message, undefined, options.url))));
+		// 总时长上限：与 idle 超时的区别在于慢速 drip 响应（chunk 间隔 < 超时值）
+		// 也会被中止，避免 doPullAll 串行循环被单请求长期卡住
+		const totalTimer = setTimeout(() => {
+			finish(() => {
+				req.destroy();
+				reject(createHttpError(`请求总时长超限(>${timeoutMs}ms): ${u.hostname}${u.pathname}`, undefined, options.url));
+			});
+		}, timeoutMs);
 		if (options.body) {
 			req.write(options.body);
 		}

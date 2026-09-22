@@ -12,8 +12,8 @@ export let config = {
 		warnThreshold: 0.8,
 		/** 是否开启 MiMo 后台自动刷新 session cookie */
 		mimoAutoRefresh: false,
-		/** 是否开启 Kimi 后台自动刷新 session cookie */
-		kimiAutoRefresh: false,
+		/** 是否开启 Kimi 后台自动续期（无 kimi.com 标签页时开后台页换发 access_token） */
+		kimiAutoRefresh: true,
 	},
 };
 
@@ -31,7 +31,7 @@ export async function loadConfig() {
 		}
 		// 确保新设置项有默认值
 		if (!config.settings) {
-			config.settings = { refreshInterval: 60, warnThreshold: 0.8, mimoAutoRefresh: false, kimiAutoRefresh: false };
+			config.settings = { refreshInterval: 60, warnThreshold: 0.8, mimoAutoRefresh: false, kimiAutoRefresh: true };
 		}
 		// 一次性迁移：旧默认刷新间隔 600s → 60s（Data Bridge 传递及时性）。
 		// flag 独立于 dashboardConfig 存储，只执行一次；用户若主动改回过 600 不会被再次翻转。
@@ -51,7 +51,8 @@ export async function loadConfig() {
 			config.settings.mimoAutoRefresh = false;
 		}
 		if (config.settings.kimiAutoRefresh === undefined) {
-			config.settings.kimiAutoRefresh = false;
+			// 默认开（与 kimi-relay.js 的 !== false 语义对齐）：存量用户未触碰开关时保持续期行为
+			config.settings.kimiAutoRefresh = true;
 		}
 	} catch (err) {
 		console.error('[Dashboard] 加载配置失败:', err);

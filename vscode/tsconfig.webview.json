@@ -1,0 +1,21 @@
+{
+  // Webview 前端程序（浏览器宿主）：含 DOM lib。
+  // 单独成程序的原因：单一 tsc 程序无法按目录区分 lib，而 compile 脚本（tsc -p ./）固定不可改，
+  // 无法走 project references 聚合（tsc -p 对 solution 配置不真正检查子项目，已验证）。
+  // 校验方式：tsc -p ./tsconfig.webview.json；ESLint typed lint 已同步引用本文件。
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
+    "types": []
+  },
+  "include": [
+    "src/webview/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    ".vscode-test"
+  ]
+}

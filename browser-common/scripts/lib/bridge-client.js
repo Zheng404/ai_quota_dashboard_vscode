@@ -73,8 +73,23 @@ const pendingPayloads = [];
 let isRetrying = false;
 const PENDING_STORAGE_KEY = 'bridgePendingPayloads';
 
+/**
+ * 冷启动初始化 gate：SW 重启后 init() 的 loadPending() 恢复 storage 队列是异步的，
+ * 挂起期间事件驱动的 enqueuePayload 若直接 persistPending 会用未恢复完成的内存队列
+ * 覆盖 storage，导致旧队列条目丢失。此处以模块级 Promise 保证恢复只执行一次，
+ * enqueuePayload 在恢复完成前等待该 Promise。
+ */
+let pendingRestorePromise = null;
+
 /** 从 chrome.storage.local 恢复待重传队列（Service Worker 重启后数据不丢失） */
-export async function loadPending() {
+export function loadPending() {
+	if (!pendingRestorePromise) {
+		pendingRestorePromise = doLoadPending();
+	}
+	return pendingRestorePromise;
+}
+
+async function doLoadPending() {
 	try {
 		const result = await chrome.storage.local.get(PENDING_STORAGE_KEY);
 		if (Array.isArray(result[PENDING_STORAGE_KEY])) {
@@ -94,6 +109,10 @@ async function persistPending() {
 }
 
 export async function enqueuePayload(payload) {
+	// 等待冷启动恢复完成，避免以未恢复的内存队列覆盖 storage 中的旧队列
+	if (pendingRestorePromise) {
+		await pendingRestorePromise;
+	}
 	if (pendingPayloads.length >= MAX_PENDING_PAYLOADS) {
 		pendingPayloads.shift();
 	}
@@ -119,6 +138,9 @@ export async function retryPending() {
 			pendingPayloads.shift();
 			await persistPending();
 		} else {
+			// 失败路径也持久化：item.retries 已自增，写回 storage 保证 SW 重启后
+			// 计数不归零（否则 MAX_RETRY_ATTEMPTS 可能永不达成）
+			await persistPending();
 			await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
 			break;
 		}

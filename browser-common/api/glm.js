@@ -16,8 +16,11 @@ const CREDENTIAL_TTL_MS = 24 * 60 * 60 * 1000;
 /**
  * 从 storage 读取 GLM API Key（带 TTL 的 { value, capturedAt } 对象副本）：
  * 超 24h 或无时间戳的存量裸字符串均视为过期，清除一次并返回 null。
+ *
+ * 单一可信源：api/glm.js（配额拉取）与 background 的 credential.js（凭证探测）
+ * 共用本函数，避免两侧行为漂移（如副本过期后探测误报 missing、拉取侧自愈成功）。
  */
-async function getGlmApiKey() {
+export async function getGlmApiKey() {
 	try {
 		const result = await chrome.storage.local.get('glmApiKey');
 		const entry = result.glmApiKey;

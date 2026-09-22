@@ -211,4 +211,106 @@ describe('saveHistory', () => {
 		const stored = ctx.globalState.get('aiQuotaDashboard.history', {}) as Record<string, UsagePoint[]>;
 		expect(Object.keys(stored)).toEqual(['keep-service']);
 	});
+
+	it('主槽有绝对量 used 时数据点打标 tokens', async () => {
+		const ctx = createMockContext();
+		const data: ServiceData = {
+			id: 'svc',
+			name: 'Svc',
+			kind: 'test',
+			slots: [{ label: 'T', percent: 50, used: 100, limit: 200 }],
+			updatedAt: Date.now(),
+		};
+
+		await saveHistory(ctx, new Map([['svc', data]]));
+		const stored = ctx.globalState.get('aiQuotaDashboard.history', {}) as Record<string, UsagePoint[]>;
+		expect(stored['svc']).toHaveLength(1);
+		expect(stored['svc'][0].kind).toBe('tokens');
+		expect(stored['svc'][0].tokens).toBe(100);
+	});
+
+	it('主槽无 used（GLM TOKENS_LIMIT 场景）时数据点打标 percent 并记录百分比', async () => {
+		const ctx = createMockContext();
+		const data: ServiceData = {
+			id: 'glm-1',
+			name: 'GLM',
+			kind: 'glm',
+			slots: [{ label: '每5小时额度', percent: 87 }],
+			updatedAt: Date.now(),
+		};
+
+		await saveHistory(ctx, new Map([['glm-1', data]]));
+		const stored = ctx.globalState.get('aiQuotaDashboard.history', {}) as Record<string, UsagePoint[]>;
+		expect(stored['glm-1']).toHaveLength(1);
+		expect(stored['glm-1'][0].kind).toBe('percent');
+		expect(stored['glm-1'][0].tokens).toBe(87);
+	});
+
+	it('语义打标变化（tokens → percent）时即使数值相同也记录新点', async () => {
+		const ctx = createMockContext();
+		const base: Omit<ServiceData, 'slots'> = { id: 'svc', name: 'Svc', kind: 'test', updatedAt: Date.now() };
+		await saveHistory(ctx, new Map([['svc', { ...base, slots: [{ label: 'T', percent: 50, used: 50, limit: 100 }] }]]));
+		await saveHistory(ctx, new Map([['svc', { ...base, slots: [{ label: 'T', percent: 50 }] }]]));
+
+		const stored = ctx.globalState.get('aiQuotaDashboard.history', {}) as Record<string, UsagePoint[]>;
+		expect(stored['svc']).toHaveLength(2);
+		expect(stored['svc'][0].kind).toBe('tokens');
+		expect(stored['svc'][1].kind).toBe('percent');
+	});
+});
+
+describe('attachHistory 本地日期去重', () => {
+	it('本地日期不同的两点（跨本地午夜）不合并，任何时区下均成立', () => {
+		// 用本地时间构造 23:45 与次日 00:15：本地日期必然不同，
+		// 旧 UTC 键在部分时区会把两点归入同一 UTC 日而错误合并
+		const d1 = new Date(2025, 5, 10, 23, 45).getTime();
+		const d2 = new Date(2025, 5, 11, 0, 15).getTime();
+		const data: ServiceData = {
+			id: 'test',
+			name: 'Test',
+			kind: 'test',
+			slots: [{ label: 'T', percent: 50, used: 100, limit: 200 }],
+			updatedAt: d2,
+			history: [{ at: d2, tokens: 20, calls: 1 }],
+		};
+		const historyMap = new Map<string, UsagePoint[]>([['test', [{ at: d1, tokens: 10, calls: 1 }]]]);
+
+		const result = attachHistory(data, historyMap);
+		expect(result.history).toHaveLength(2);
+	});
+
+	it('本地日期相同的两点（分钟级多次刷新）去重保留一个', () => {
+		const d1 = new Date(2025, 5, 10, 10, 0).getTime();
+		const d2 = new Date(2025, 5, 10, 10, 30).getTime();
+		const data: ServiceData = {
+			id: 'test',
+			name: 'Test',
+			kind: 'test',
+			slots: [{ label: 'T', percent: 50, used: 100, limit: 200 }],
+			updatedAt: d2,
+			history: [{ at: d2, tokens: 20, calls: 1 }],
+		};
+		const historyMap = new Map<string, UsagePoint[]>([['test', [{ at: d1, tokens: 10, calls: 1 }]]]);
+
+		const result = attachHistory(data, historyMap);
+		expect(result.history).toHaveLength(1);
+	});
+
+	it('存量无 kind 字段的历史点读取容忍（不回写迁移）', () => {
+		const now = Date.now();
+		const data: ServiceData = {
+			id: 'test',
+			name: 'Test',
+			kind: 'test',
+			slots: [{ label: 'T', percent: 50, used: 100, limit: 200 }],
+			updatedAt: now,
+		};
+		// 模拟旧版写入的无 kind 数据点
+		const legacy = [{ at: now - 86400000, tokens: 50, calls: 1 }];
+		const historyMap = new Map<string, UsagePoint[]>([['test', legacy]]);
+
+		const result = attachHistory(data, historyMap);
+		expect(result.history).toHaveLength(1);
+		expect(result.history?.[0].kind).toBeUndefined();
+	});
 });

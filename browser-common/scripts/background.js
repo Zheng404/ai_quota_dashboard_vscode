@@ -31,9 +31,6 @@ import {
 import { BRIDGE, discoverPort, retryPending, loadPending } from './lib/bridge-client.js';
 import {
 	checkCredentialValidity,
-	loadCredentialCache,
-	probeCachedCredential,
-	clearCredentialCache,
 	shouldForceRefresh,
 	isAutoRefreshEnabled,
 	loadCredentialViaBackgroundTab,
@@ -70,23 +67,8 @@ const lastCredentialStatus = {};
 async function checkAndRefreshCredentials() {
   console.log('[Credential] 开始凭证检测循环...');
   for (const kind of activeKinds) {
-    let status = await checkCredentialValidity(kind);
+    const status = await checkCredentialValidity(kind);
     console.log(`[Credential] ${kind} 凭证状态: ${status}`);
-
-    // MiMo 特殊处理：session cookie 可能已消失，但本地缓存仍有效
-    // （kimi 走 relay 镜像检测链，不返回 missing，天然不适用）
-    if (kind === 'mimo' && status === 'missing') {
-      const cache = await loadCredentialCache(kind);
-      if (cache?.cookie) {
-        const probeStatus = await probeCachedCredential(kind, cache.cookie);
-        console.log(`[Credential] ${kind} 本地缓存探测结果: ${probeStatus}`);
-        if (probeStatus === 'valid') {
-          status = 'valid';
-        } else {
-          await clearCredentialCache(kind);
-        }
-      }
-    }
 
     const needsRefresh = status === 'missing' || status === 'expired' || status === 'invalid';
     // 失效刷新下限间隔：needsRefresh 每轮都成立时，10 分钟内最多真正刷新一次
@@ -348,11 +330,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // 此处不再重复 relayData（避免双重推送），仅兜底确保端口已连接，
   // storage.onChanged 的 relayData 会在端口就绪后实际推送。
   if (msg.action === MSG.CONFIG_UPDATED) {
-    loadActiveKinds().then(async () => {
-      await discoverPort();
-      sendResponse({ success: true });
-    });
-    return true;
+    // 非阻塞：立即应答，端口发现（最坏 ~22s 串行探测 11 端口 × 2s）放后台异步执行，
+    // 不得串行卡在 popup 保存按钮的应答路径上（保存最长阻塞 ~22s 的事故点）
+    loadActiveKinds()
+      .then(() => discoverPortAndBroadcast())
+      .catch(() => { /* 探测失败保留 lastError，由 healthCheck 周期重试 */ });
+    sendResponse({ success: true });
+    return false;
   }
 
   // 手动触发凭证检测 + 刷新

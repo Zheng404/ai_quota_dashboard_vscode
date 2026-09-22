@@ -1,0 +1,16 @@
+{
+  // 共享编译选项（extension 与 webview 两个程序的公共基底，lib/types 由各程序自行声明）
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2020",
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}

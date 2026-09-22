@@ -92,6 +92,17 @@ let invalidatedAt = 0;
 /** 作废豁免期：期内同一令牌值拒绝重新入库（用户重新登录后 kimi.com 会写入新令牌值，不受影响） */
 const INVALIDATED_TOKEN_GRACE_MS = 5 * 60 * 1000;
 
+/** 令牌镜像 compare-and-set 互斥锁（模块级 Promise 链，同 withRenewalTabsLock 模式）：
+ * 「读 existing → 比较 → 决定写入」为临界区，并发上报交错读取同一旧镜像后互相
+ * 覆盖写入，理论上可让镜像倒退（滞后令牌覆盖较新令牌）。锁内绝不调用
+ * closeRenewalTabs（其内部持有 renewal 锁，避免锁嵌套）。 */
+let kimiTokenLock = Promise.resolve();
+function withKimiTokenLock(fn) {
+  const run = kimiTokenLock.then(fn, fn);
+  kimiTokenLock = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 /** 令牌是否处于「已作废豁免期」（死令牌拒绝重新入库/供应） */
 function isInvalidatedToken(token) {
   if (!token || !invalidatedToken) return false;
@@ -113,32 +124,40 @@ export async function saveKimiTokenRelay(payload) {
     console.warn('[KimiRelay] 上报令牌与近期作废的死令牌相同，拒绝入库');
     return;
   }
-  const existing = kimiTokenMemory ?? await loadKimiTokenRelay();
-  if (payload?.accessToken && existing?.accessToken) {
-    // 两种上报不覆盖现有镜像：
-    // ① 同一令牌重复上报（不重置 capturedAt，防旧令牌借新时间戳伪装新鲜）；
-    // ② 过期时间更早的滞后令牌（多标签页场景下旧页未刷新、重报更旧的令牌值，
-    //    不得让镜像倒退）。新换发的令牌 exp 必然更晚，正常上报不受影响。
-    const existingExp = readJwtExp(existing.accessToken);
-    const incomingExp = readJwtExp(payload.accessToken);
-    if (payload.accessToken === existing.accessToken
-      || (existingExp != null && incomingExp != null && incomingExp <= existingExp)) {
-      console.log('[KimiRelay] 上报令牌不新于现有镜像，跳过保存');
-      return;
+  // compare-and-set 临界区持令牌锁：读 existing → 比较 → 决定写入 全程串行，
+  // 杜绝并发上报交错导致的镜像倒退；释放锁后才执行关页/通知（严禁持令牌锁
+  // 获取 renewal 锁，closeRenewalTabs 内部会持 renewal 锁）
+  let record = null;
+  await withKimiTokenLock(async () => {
+    const existing = kimiTokenMemory ?? await loadKimiTokenRelay();
+    if (payload?.accessToken && existing?.accessToken) {
+      // 两种上报不覆盖现有镜像：
+      // ① 同一令牌重复上报（不重置 capturedAt，防旧令牌借新时间戳伪装新鲜）；
+      // ② 过期时间更早的滞后令牌（多标签页场景下旧页未刷新、重报更旧的令牌值，
+      //    不得让镜像倒退）。新换发的令牌 exp 必然更晚，正常上报不受影响。
+      const existingExp = readJwtExp(existing.accessToken);
+      const incomingExp = readJwtExp(payload.accessToken);
+      if (payload.accessToken === existing.accessToken
+        || (existingExp != null && incomingExp != null && incomingExp <= existingExp)) {
+        console.log('[KimiRelay] 上报令牌不新于现有镜像，跳过保存');
+        return;
+      }
     }
-  }
-  const record = {
-    accessToken: payload?.accessToken || null,
-    // refresh_token 只镜像存储、不推送远端（阶段 2 预留）
-    refreshToken: payload?.refreshToken || null,
-    capturedAt: payload?.capturedAt || Date.now(),
-  };
-  kimiTokenMemory = record;
-  try {
-    await chrome.storage.local.set({ [KIMI_TOKEN_STORAGE_KEY]: record });
-  } catch (err) {
-    console.error('[KimiRelay] 保存令牌镜像失败:', err.message);
-  }
+    record = {
+      accessToken: payload?.accessToken || null,
+      // refresh_token 只镜像存储、不推送远端（阶段 2 预留）
+      refreshToken: payload?.refreshToken || null,
+      capturedAt: payload?.capturedAt || Date.now(),
+    };
+    kimiTokenMemory = record;
+    try {
+      await chrome.storage.local.set({ [KIMI_TOKEN_STORAGE_KEY]: record });
+    } catch (err) {
+      console.error('[KimiRelay] 保存令牌镜像失败:', err.message);
+    }
+  });
+  // 被跳过（record 仍为 null）：直接返回，不触发关页/通知
+  if (!record) return;
   // 镜像已更新（续期使命完成）：关闭续期后台页。
   // 必须 await 而非 void：MV3 SW 在消息应答后可能被回收，fire-and-forget 的
   // 异步关页链（query→storage→remove）会被截断，导致续期页残留不关闭
@@ -286,6 +305,17 @@ if (typeof chrome.tabs?.onUpdated?.addListener === 'function') {
   });
 }
 
+/** 进入空闲/锁屏时关闭在跑的续期页：冻结态下页面无法完成换发使命，留着只会成为
+ *  「后台长时间不操作 → 续期页打开后无人关」的常驻页；恢复 active 后由后续
+ *  credential/relay 周期按需重开。与 onUpdated 捕获同一模块作用域注册。 */
+if (typeof chrome.idle?.onStateChanged?.addListener === 'function') {
+  chrome.idle.onStateChanged.addListener((state) => {
+    if (state !== 'active') {
+      void closeRenewalTabs().catch(() => { /* 关闭失败由 sweep 兜底 */ });
+    }
+  });
+}
+
 /** 将导航中携带续期 hash 的标签页登记入跟踪表（幂等，持锁防并发覆盖） */
 async function trackRenewalTab(tabId) {
   await withRenewalTabsLock(async () => {
@@ -404,6 +434,20 @@ async function isKimiAutoRefreshEnabled() {
   }
 }
 
+/** 系统空闲判定窗口（秒）：续期页依赖 kimi.com SPA 在可运行的标签页里换发令牌，
+ *  系统长时间无输入（idle）或锁屏（locked）时后台标签页被冻结/节流，续期绝无
+ *  成功可能——此时开页只会留下「打开后无人关」的常驻页，一律跳过 */
+const IDLE_DETECTION_INTERVAL_S = 60;
+
+/** 读取系统空闲状态（chrome.idle；API 不可用时按 active 处理，保持既有开页行为） */
+async function querySystemIdleState() {
+  try {
+    return await chrome.idle.queryState(IDLE_DETECTION_INTERVAL_S);
+  } catch {
+    return 'active';
+  }
+}
+
 /** 续期页确保操作的并发护栏（并发 401 双请求同时进入时只放行一次） */
 let ensureRenewalInFlight = false;
 
@@ -425,6 +469,15 @@ async function ensureRenewalTab(forceRenewal = false) {
   try {
     if (!(await isKimiAutoRefreshEnabled())) {
       console.log('[KimiRelay] 用户已关闭 Kimi 自动后台续期，跳过开页');
+      return;
+    }
+
+    // 系统空闲（无输入超时/锁屏）时后台标签页被冻结，续期页换发令牌绝无可能；
+    // 此时开页只会留下「打开后无人关」的常驻页——直接跳过，恢复 active 后由
+    // 后续周期按需重开（onStateChanged 会顺手关闭已存在的续期页）
+    const idleState = await querySystemIdleState();
+    if (idleState !== 'active') {
+      console.log(`[KimiRelay] 系统空闲（${idleState}），跳过开页续期`);
       return;
     }
 

@@ -12,40 +12,11 @@
 import { TIMEOUTS } from '../../protocol/index.js';
 import { COOKIE_TARGETS, refreshIntervalMs } from './config-sync.js';
 import { timeoutSignal } from './bridge-client.js';
-import { CREDENTIAL_TTL_MS, findCookieByName } from './cookie-utils.js';
+import { findCookieByName } from './cookie-utils.js';
 import { checkKimiRelayValidity } from './kimi-relay.js';
-
-// r-timezone 请求头值（2026 年 Kimi WAF 校验需要，模块加载时求值一次；
-// 缺失会导致凭证探测被 WAF 误拒 → 误判凭证失效 → 触发可见标签页刷新死循环）
-const R_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
-
-/**
- * 读取带 TTL 的 GLM API Key 副本（storage.local 条目为 { value, capturedAt } 对象）：
- * 超 24h 或无时间戳的存量裸字符串均视为过期，清除一次并返回 null。
- */
-export async function readGlmApiKeyEntry() {
-  const key = 'glmApiKey';  try {
-    const result = await chrome.storage.local.get(key);
-    const entry = result[key];
-    if (entry && typeof entry === 'object' && entry.value) {
-      if (entry.capturedAt && Date.now() - entry.capturedAt <= CREDENTIAL_TTL_MS) {
-        return entry.value;
-      }
-      await chrome.storage.local.remove(key);
-      console.log('[Relay] glmApiKey 已过期，清除');
-      return null;
-    }
-    if (typeof entry === 'string' && entry) {
-      // 存量裸字符串（无时间戳），视为过期清除一次
-      await chrome.storage.local.remove(key);
-      console.log('[Relay] glmApiKey 为无时间戳的存量条目，清除');
-    }
-    return null;
-  } catch (err) {
-    console.error('[Relay] 读取 glmApiKey 失败:', err.message);
-    return null;
-  }
-}
+// GLM API Key 读取（TTL 校验 + dashboardConfig 自愈重播种）统一收敛在 api/glm.js，
+// 本模块与配额拉取侧共用同一实现，避免副本过期后探测/拉取行为漂移
+import { getGlmApiKey } from '../../api/glm.js';
 
 // ===== Cookie 类凭证本地缓存与后台刷新（MiMo / Kimi 通用）=====
 
@@ -59,26 +30,7 @@ function getCredentialCacheKey(kind) {
   return CREDENTIAL_CACHE_KEYS[kind];
 }
 
-/** 加载本地缓存的凭证（超 24h 未更新或无时间戳的存量条目视为过期，清除后返回 null） */
-export async function loadCredentialCache(kind) {
-  const key = getCredentialCacheKey(kind);
-  if (!key) return null;
-  try {
-    const result = await chrome.storage.local.get(key);
-    const cache = result[key] || null;
-    if (cache && (!cache.capturedAt || Date.now() - cache.capturedAt > CREDENTIAL_TTL_MS)) {
-      await chrome.storage.local.remove(key);
-      console.log(`[CredentialCache] ${kind} 缓存已过期，清除`);
-      return null;
-    }
-    return cache;
-  } catch (err) {
-    console.error(`[CredentialCache] ${kind} 加载缓存失败:`, err.message);
-    return null;
-  }
-}
-
-/** 保存凭证到本地缓存 */
+/** 保存凭证到本地缓存（唯一存活调用方为下方 loadCredentialViaBackgroundTab 的刷新落盘） */
 export async function saveCredentialCache(kind, cookieString) {
   const key = getCredentialCacheKey(kind);
   if (!key) return;
@@ -91,61 +43,6 @@ export async function saveCredentialCache(kind, cookieString) {
     console.log(`[CredentialCache] ${kind} 已更新缓存`);
   } catch (err) {
     console.error(`[CredentialCache] ${kind} 保存缓存失败:`, err.message);
-  }
-}
-
-/** 清除本地缓存的凭证 */
-export async function clearCredentialCache(kind) {
-  const key = getCredentialCacheKey(kind);
-  if (!key) return;
-  try {
-    await chrome.storage.local.remove(key);
-    console.log(`[CredentialCache] ${kind} 已清除缓存`);
-  } catch (err) {
-    console.error(`[CredentialCache] ${kind} 清除缓存失败:`, err.message);
-  }
-}
-
-/** 用缓存的凭证探测是否仍有效 */
-export async function probeCachedCredential(kind, cookieString) {
-  const config = COOKIE_TARGETS[kind];
-  if (!config || !config.probeUrl) return 'unknown';
-
-  try {
-    const headers = {
-      'Accept': 'application/json',
-    };
-    // Kimi 使用 Bearer Token（kimi-auth 值），MiMo 使用 Cookie 头
-    if (kind === 'kimi') {
-      headers['Authorization'] = `Bearer ${cookieString}`;
-      // Kimi WAF 校验 r-timezone 头，缺失会被误拒导致误判凭证失效
-      headers['r-timezone'] = R_TIMEZONE;
-    } else {
-      headers['Cookie'] = cookieString;
-    }
-
-    const res = await fetch(config.probeUrl, {
-      method: 'GET',
-      headers,
-      signal: timeoutSignal(TIMEOUTS.credentialProbe),
-    });
-
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
-        return 'invalid';
-      }
-      return 'unknown';
-    }
-
-    const data = await res.json().catch(() => null);
-    if (data && typeof data.code === 'number' && data.code !== 0) {
-      return 'invalid';
-    }
-
-    return 'valid';
-  } catch (err) {
-    console.warn(`[CredentialCache] ${kind} 探测缓存凭证失败:`, err.message);
-    return 'unknown';
   }
 }
 
@@ -246,8 +143,9 @@ export async function checkCredentialValidity(kind) {
   // GLM：API Key 存储在 chrome.storage.local
   if (config.storageKey) {
     try {
-      // 带 TTL 的对象副本，读取时校验有效期（过期视为未配置）
-      const apiKey = await readGlmApiKeyEntry();
+      // 带 TTL 的对象副本，读取时校验有效期（过期视为未配置；副本断供时
+      // 经 getGlmApiKey 从 dashboardConfig 自愈重播种，与配额拉取侧口径一致）
+      const apiKey = await getGlmApiKey();
       if (!apiKey) {
         console.log(`[Credential] ${kind} API Key 未配置`);
         return 'missing';
@@ -262,6 +160,8 @@ export async function checkCredentialValidity(kind) {
         signal: timeoutSignal(TIMEOUTS.apiProbe),
       });
       if (res.status === 401) return 'invalid';
+      // 5xx/网络层等非 401 失败不得误报 valid（对齐下方 MiMo 分支口径）
+      if (!res.ok) return 'unknown';
       return 'valid';
     } catch (err) {
       console.warn(`[Credential] ${kind} 探测失败:`, err.message);

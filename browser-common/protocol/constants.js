@@ -1,11 +1,11 @@
 /**
  * Data Bridge 协议常量 — 双端（浏览器扩展 / VSCode 扩展）单一可信源
  *
- * 浏览器端直接 import 本模块；VSCode 端因 tsc rootDir 限制暂不能 runtime
- * import JS，以 `vscode/src/bridge/constants.ts` 镜像常量过渡，由契约测试
- * `vscode/src/bridge/protocol.test.ts` 守卫逐值等价。
+ * 浏览器端直接 import 本模块；VSCode 端同样 runtime 直 import（esbuild 打包时
+ * 内联 JS 实现，tsc 类型检查走同目录 index.d.ts 类型出口），双端单一可信源，
+ * 由契约测试 `vscode/src/bridge/protocol.test.ts` 守卫（基线值锁定 + 漂移扫描）。
  *
- * 修改任何值时必须同步镜像文件，否则契约测试失败。
+ * 修改任何值时契约测试会失败，两侧天然一致，无需手动同步镜像。
  */
 
 /** Bridge 监听端口范围起点（127.0.0.1） */

@@ -31,24 +31,52 @@ const KIMI_CODE_KEY_PREFIX = 'sk-';
  */
 const R_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
 
-// ===== relay 镜像直读常量（与 scripts/lib/kimi-relay.js 保持同步，popup 首屏短路用）=====
+// ===== relay 镜像直读常量（判定口径与 scripts/lib/kimi-relay.js 的 readJwtExp/isFreshToken
+// 保持一致：JWT 按 exp 判定、非 JWT 回退 capturedAt 陈旧阈值，popup 首屏短路用）=====
 /** relay 镜像的 storage.local 键名（与 kimi-relay.js KIMI_TOKEN_STORAGE_KEY 同步） */
 const KIMI_TOKEN_STORAGE_KEY = 'kimiTokenRelay';
-/** 镜像新鲜阈值（与 kimi-relay.js KIMI_TOKEN_STALE_MS 同步） */
+/** 镜像新鲜阈值（与 kimi-relay.js KIMI_TOKEN_STALE_MS 同步，非 JWT 令牌的回退口径） */
 const KIMI_TOKEN_STALE_MS = 10 * 60 * 1000;
+/** 令牌新鲜度余量（与 kimi-relay.js TOKEN_FRESH_MARGIN_MS 同步）：exp 距现在不足 60s 视为陈旧 */
+const TOKEN_FRESH_MARGIN_MS = 60_000;
 /** popup 向 background 索取 token 的消息 deadline：超时就地降级，不阻塞首屏 */
 const GET_TOKEN_MESSAGE_TIMEOUT_MS = 5000;
 
 /**
+ * 解析 JWT payload 的 exp（秒）。非 JWT 或解析失败返回 null。
+ * 注意：本文件是 content-script 可用的独立模块，不能直接 import kimi-relay.js，
+ * 此处为等价轻量实现，判定口径修改时需与 kimi-relay.js 手动同步。
+ */
+function readJwtExp(token) {
+	try {
+		const payload = String(token).split('.')[1];
+		if (!payload) return null;
+		const json = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+		return typeof json.exp === 'number' ? json.exp : null;
+	} catch {
+		return null;
+	}
+}
+
+/** 令牌按 exp 判定是否新鲜（非 JWT 回退 capturedAt 陈旧阈值，与 kimi-relay.js isFreshToken 同规则） */
+function isFreshRelayToken(token, capturedAt) {
+	const exp = readJwtExp(token);
+	if (exp != null) return exp * 1000 - Date.now() > TOKEN_FRESH_MARGIN_MS;
+	return Date.now() - (capturedAt || 0) <= KIMI_TOKEN_STALE_MS;
+}
+
+/**
  * popup/dashboard 直读 relay 镜像：令牌新鲜则免消息往返直接使用，
  * 把 background 应答延迟从关键路径上移除。
+ * 新鲜度判定必须与 kimi-relay.js 的供应口径一致（按 exp，60s 余量），
+ * 否则已过期令牌会被直读采用、直接打出 401 拖慢首屏。
  * @returns {Promise<string|null>} 新鲜 access_token 或 null
  */
 async function readFreshRelayToken() {
 	try {
 		const result = await chrome.storage.local.get(KIMI_TOKEN_STORAGE_KEY);
 		const record = result?.[KIMI_TOKEN_STORAGE_KEY];
-		if (record?.accessToken && (Date.now() - (record.capturedAt || 0)) <= KIMI_TOKEN_STALE_MS) {
+		if (record?.accessToken && isFreshRelayToken(record.accessToken, record.capturedAt)) {
 			return record.accessToken;
 		}
 	} catch { /* ignore，回退消息路径 */ }
@@ -166,7 +194,15 @@ async function kimiPost(path, token, body = {}, source = null) {
 function parseWindowSlot(limits) {
 	if (!limits || limits.length === 0) return null;
 
-	const lim = limits[0];
+	// 与 parseCodeLimitsSlot 同策略：优先精确匹配 5h 窗口（300 分钟），
+	// 找不到取换算后最短窗口兜底（不盲取 limits[0]，避免服务端排序变化取错窗口）
+	const fiveHour = limits.find(l =>
+		l?.window?.duration === 300
+		&& (l.window.timeUnit === 'TIME_UNIT_MINUTE' || l.window.timeUnit === 'MINUTE'));
+	const shortest = [...limits].sort((a, b) => codeWindowMinutes(a.window) - codeWindowMinutes(b.window))[0];
+	const lim = fiveHour ?? shortest;
+	if (!lim) return null;
+
 	const detail = lim.detail;
 	if (!detail) return null;
 
@@ -189,7 +225,7 @@ function parseWindowSlot(limits) {
 	const limit = parseInt(detail.limit ?? '0', 10);
 	const used = parseInt(detail.used ?? '0', 10);
 	const percent = limit > 0 ? (used / limit) * 100 : 0;
-	const resetsAt = detail.resetTime ? new Date(detail.resetTime).getTime() : null;
+	const resetsAt = toResetTimestamp(detail.resetTime) ?? null;
 
 	return {
 		label: `频率限制明细 (${windowLabel})`,
@@ -209,7 +245,7 @@ function parseMainSlot(detail) {
 	const limit = parseInt(detail.limit ?? '0', 10);
 	const used = parseInt(detail.used ?? '0', 10);
 	const percent = limit > 0 ? (used / limit) * 100 : 0;
-	const resetsAt = detail.resetTime ? new Date(detail.resetTime).getTime() : null;
+	const resetsAt = toResetTimestamp(detail.resetTime) ?? null;
 
 	return {
 		label: '本周用量',
@@ -235,7 +271,7 @@ function parseBalanceSlot(balances) {
 		percent: Math.min(percent, 100),
 		used: undefined,
 		limit: undefined,
-		resetsAt: bal.expireTime ? new Date(bal.expireTime).getTime() : null,
+		resetsAt: toResetTimestamp(bal.expireTime) ?? null,
 	};
 }
 
@@ -473,7 +509,7 @@ async function fetchViaWeb(token, source = null) {
 					percent: Math.min(ratio * 100, 100),
 					used: undefined,
 					limit: undefined,
-					resetsAt: bal.expireTime ? new Date(bal.expireTime).getTime() : null,
+					resetsAt: toResetTimestamp(bal.expireTime) ?? null,
 				});
 			}
 		}

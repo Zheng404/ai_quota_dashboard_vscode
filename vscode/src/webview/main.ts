@@ -33,12 +33,20 @@ function bindRefreshButtons(): void {
 // ====== Tab 切换 ======
 // 三个顶级 tab：仪表盘 / 服务 / 设置，通过 data-tab 切换对应 panel
 
+/** 最近一次 updateData 消息（切换 tab 时强制重渲染用，保证显示最新数据） */
+let lastUpdateMessage: UpdateDataMessage | undefined;
+
 document.querySelectorAll<HTMLElement>('.tab-btn').forEach(btn => {
 	btn.addEventListener('click', () => {
 		document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
 		document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
 		btn.classList.add('active');
-		document.getElementById('panel-' + (btn.dataset.tab ?? ''))?.classList.add('active');
+		const tab = btn.dataset.tab ?? 'dashboard';
+		document.getElementById('panel-' + tab)?.classList.add('active');
+		// 切换 tab 时强制重渲染一次设置类 panel，保证显示最新数据
+		servicesPanelHash = '';
+		globalPanelHash = '';
+		if (lastUpdateMessage) { handleUpdateData(lastUpdateMessage); }
 	});
 });
 
@@ -58,10 +66,27 @@ document.addEventListener('click', (e) => {
 
 // ====== 接收数据更新（渲染调度） ======
 
-/** updateData 消息处理：仪表盘 / 服务 / 设置三个 panel 的全量重渲染 */
+/** 服务/全局设置面板上次渲染时的数据指纹（JSON 序列化比较，数据量小，KISS）。
+ *  空串表示「待强制渲染」（首次渲染或刚切换过 tab）。 */
+let servicesPanelHash = '';
+let globalPanelHash = '';
+
+/** 目标面板内是否正有输入控件持有焦点（用户正在编辑，此时重渲染会冲掉输入） */
+function isEditingInPanel(panel: HTMLElement | null): boolean {
+	if (!panel) { return false; }
+	const ae = document.activeElement;
+	if (!(ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement || ae instanceof HTMLSelectElement)) {
+		return false;
+	}
+	return panel.contains(ae);
+}
+
+/** updateData 消息处理：仪表盘每轮正常重渲染（无缝刷新）；
+ *  服务/全局设置面板含输入框，仅在数据确实变化且用户未在编辑时才重渲染 */
 function handleUpdateData(message: UpdateDataMessage): void {
 	const services = message.services;
 	const settings = message.settings;
+	lastUpdateMessage = message;
 
 	const dashboardPanel = document.getElementById('panel-dashboard');
 	if (dashboardPanel) {
@@ -117,15 +142,30 @@ function handleUpdateData(message: UpdateDataMessage): void {
 				lastError: bd.lastError,
 			} : { connected: false, receivedKinds: [] };
 		}
-		servicesPanel.innerHTML = renderServiceListSettings(settings, bridgeState);
-		bindServiceEvents();
-		bindAddService();
+		// 设置类 panel 条件重渲染：数据指纹变化 且 用户未在面板内编辑输入框。
+		// 轮询刷新每轮都会推 updateData，无条件 innerHTML 会冲掉正在输入的 API Key/名称。
+		const servicesHash = JSON.stringify({
+			profiles: settings.profiles,
+			keys: settings.keys,
+			bridge: bridgeState,
+		});
+		if (servicesHash !== servicesPanelHash && !isEditingInPanel(servicesPanel)) {
+			servicesPanel.innerHTML = renderServiceListSettings(settings, bridgeState);
+			servicesPanelHash = servicesHash;
+			bindServiceEvents();
+			bindAddService();
+		}
 	}
 
 	const globalPanel = document.getElementById('panel-global');
 	if (globalPanel) {
-		globalPanel.innerHTML = renderGlobalSettings(settings);
-		bindGlobalEvents();
+		// 同上：仅在数据变化且未编辑时重渲染，避免轮询冲掉全局设置输入
+		const globalHash = JSON.stringify(settings);
+		if (globalHash !== globalPanelHash && !isEditingInPanel(globalPanel)) {
+			globalPanel.innerHTML = renderGlobalSettings(settings);
+			globalPanelHash = globalHash;
+			bindGlobalEvents();
+		}
 	}
 }
 

@@ -11,7 +11,9 @@
 const MIMO_BASE_URL = 'https://platform.xiaomimimo.com';
 
 /**
- * 检查并主动请求 MiMo Cookie 读取权限
+ * 检查 MiMo Cookie 读取权限。cookies 权限与目标 origin 均为 manifest 必需权限，
+ * contains 在正常使用下恒 true；Service Worker 无用户手势，permissions.request
+ * 必然失败，故不做主动请求，缺失时由调用方返回引导错误文案。
  */
 async function ensureCookiePermission() {
 	if (!chrome.permissions) {
@@ -22,18 +24,12 @@ async function ensureCookiePermission() {
 			permissions: ['cookies'],
 			origins: ['https://platform.xiaomimimo.com/*'],
 		});
-		if (has) {
-			return true;
+		if (!has) {
+			console.error('[MiMoAPI] 缺少 platform.xiaomimimo.com 的 Cookie 权限');
 		}
-		console.warn('[MiMoAPI] 缺少 platform.xiaomimimo.com 的 Cookie 权限，尝试请求...');
-		const granted = await chrome.permissions.request({
-			permissions: ['cookies'],
-			origins: ['https://platform.xiaomimimo.com/*'],
-		});
-		console.log('[MiMoAPI] 权限请求结果:', granted);
-		return granted;
+		return has;
 	} catch (err) {
-		console.error('[MiMoAPI] 检查/请求权限失败:', err);
+		console.error('[MiMoAPI] 检查 Cookie 权限失败:', err);
 		return false;
 	}
 }
