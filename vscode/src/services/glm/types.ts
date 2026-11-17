@@ -5,6 +5,12 @@ import { ServiceData, UsagePoint } from '../../core/types';
 /** 时间范围标识 */
 export type TimeRange = 'day' | 'week' | 'month';
 
+/** 单个详情范围的加载终态；error 可通过再次请求重试。 */
+export interface GlmDetailState {
+	status: 'loading' | 'ok' | 'error';
+	message?: string;
+}
+
 /** GLM 服务专用数据（扩展自 ServiceData） */
 export interface GlmServiceData extends ServiceData {
 	/** 套餐等级，如 'pro' */
@@ -19,6 +25,8 @@ export interface GlmServiceData extends ServiceData {
 	modelUsageByRange?: Partial<Record<TimeRange, ModelUsageData>>;
 	/** 按时间范围缓存的工具用量数据 */
 	toolUsageByRange?: Partial<Record<TimeRange, ToolUsageData>>;
+	/** 各详情范围的加载状态，全局刷新时随范围缓存一并保留。 */
+	detailStates?: Partial<Record<TimeRange, GlmDetailState>>;
 }
 
 /** 模型用量汇总 */

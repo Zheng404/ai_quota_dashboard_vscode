@@ -127,6 +127,9 @@ export class StatusBar {
 				};
 				this.items.set(d.id, item);
 			}
+			if (item.command && typeof item.command === 'object') {
+				item.command.title = '刷新 ' + d.name;
+			}
 
 			if (d.err) {
 				item.text = `${d.name}: ✗`;
@@ -234,6 +237,10 @@ export class StatusBar {
 		}
 
 		md.appendMarkdown(`最近更新: ${new Date(d.updatedAt).toLocaleString()}\n\n`);
+		if (d.staleError) {
+			md.appendMarkdown(`*数据过期 · 刷新失败*\n\n`);
+			md.appendMarkdown(`*当前显示上次成功数据 · ${escapeMarkdown(d.staleError)}*\n\n`);
+		}
 		md.appendMarkdown(`---\n\n`);
 
 		// 配额区域
@@ -246,8 +253,8 @@ export class StatusBar {
 			const pct = q.percent.toFixed(0);
 			md.appendMarkdown(`**${escapeMarkdown(q.label)}** **${pct}%** 已使用\n\n`);
 
-		const filled = Number.isFinite(q.percent) ? Math.max(0, Math.min(20, Math.round((q.percent / 100) * 20))) : 0;
-		const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+			const filled = Number.isFinite(q.percent) ? Math.max(0, Math.min(20, Math.round((q.percent / 100) * 20))) : 0;
+			const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
 			md.appendMarkdown(`${bar}\n\n`);
 
 			if (q.used != null && q.limit != null) {
@@ -275,13 +282,6 @@ export class StatusBar {
 	}
 
 	dispose() {
-		for (const item of this.items.values()) {
-			item.dispose();
-		}
-		this.items.clear();
-		if (this.emptyItem) {
-			this.emptyItem.dispose();
-			this.emptyItem = undefined;
-		}
+		this.clear();
 	}
 }

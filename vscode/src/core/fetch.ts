@@ -111,9 +111,13 @@ function doRequest<T>(options: HttpRequestOptions): Promise<DoRequestResult<T>> 
 				const contentType = res.headers['content-type'] ?? '';
 
 				if (res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300) {
-					// 非 JSON 响应直接返回原始文本
-					if (!contentType.includes('application/json')) {
-						resolve({ result: body as unknown as T, statusCode: res.statusCode });
+					// JSON 接口不接受 HTML/纯文本等成功响应，避免将登录页或网关错误误当业务数据
+					if (!contentType) {
+						reject(createHttpError('响应缺少 JSON Content-Type', res.statusCode, options.url));
+						return;
+					}
+					if (!contentType.toLowerCase().includes('json')) {
+						reject(createHttpError('响应 Content-Type 非 JSON', res.statusCode, options.url));
 						return;
 					}
 					try { resolve({ result: JSON.parse(body) as T, statusCode: res.statusCode }); }
@@ -171,9 +175,10 @@ export async function httpRequest<T>(options: HttpRequestOptions): Promise<T> {
 			return result;
 		} catch (err) {
 			lastError = err as Error;
+			const statusCode = err instanceof Error ? (err as HttpError).statusCode : undefined;
 			const isRetryable = err instanceof Error && (
-				(err as HttpError).statusCode === undefined || // 网络错误
-				((err as HttpError).statusCode !== undefined && (err as HttpError).statusCode! >= 500) // 服务端错误
+				statusCode === undefined || // 网络错误
+				statusCode >= 500 // 服务端错误
 			);
 			if (attempt < retries && isRetryable) {
 				const delay = retryDelay * Math.pow(2, attempt);

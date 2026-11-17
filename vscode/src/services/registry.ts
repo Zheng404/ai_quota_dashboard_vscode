@@ -56,10 +56,8 @@ export function createRegistry(initial: ServiceDescriptor[] = []): ServiceRegist
 
 import { glmDescriptor } from './glm';
 import { kimiDescriptor } from './kimi';
-import { mimoDescriptor } from './mimo';
-import { bridgeDescriptor } from './bridge';
 
-const _defaultRegistry = createRegistry([glmDescriptor, kimiDescriptor, mimoDescriptor, bridgeDescriptor]);
+const _defaultRegistry = createRegistry([glmDescriptor, kimiDescriptor]);
 
 export const getDescriptor = _defaultRegistry.getDescriptor;
 export const getAllDescriptors = _defaultRegistry.getAllDescriptors;

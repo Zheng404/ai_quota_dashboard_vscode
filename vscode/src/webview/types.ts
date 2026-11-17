@@ -6,7 +6,6 @@
 // 本模块为 webview bundle 边界内的独立定义（JSON 序列化传输，字段按防御性可选处理）
 
 import type { ServiceData, ServiceProfile } from '../core/types';
-import type { BridgeServiceData } from '../services/bridge/types';
 
 // ==================== Webview 版服务数据 ====================
 
@@ -47,7 +46,21 @@ export interface SwitchToSettingsMessage {
 	subtab?: 'services' | 'global';
 }
 
-export type ExtToWebviewMessage = UpdateDataMessage | SwitchToSettingsMessage;
+export type SaveGlobalField = 'refreshInterval' | 'warnThreshold' | 'afkThreshold';
+
+/** saveGlobal 命令的结构化校验结果。 */
+export interface SaveGlobalResult {
+	ok: boolean;
+	field?: SaveGlobalField;
+	message?: string;
+}
+
+/** saveGlobalResult：全局设置校验或保存结果反馈。 */
+export interface SaveGlobalResultMessage extends SaveGlobalResult {
+	command: 'saveGlobalResult';
+}
+
+export type ExtToWebviewMessage = UpdateDataMessage | SwitchToSettingsMessage | SaveGlobalResultMessage;
 
 // ==================== Webview → Extension ====================
 
@@ -72,13 +85,11 @@ export interface ServiceSettingsMeta {
 	keyHint: string;
 	showHelpButton: boolean;
 	helpCommand: string;
+	/** 是否开放自定义 API origin；未开放时保存不得清除已有 endpoint。 */
+	endpointEditable?: boolean;
+	endpointPlaceholder?: string;
 }
 
-/** Bridge 状态视图（从 BridgeServiceData 提取，供服务列表条目展示） */
-export type BridgeStateView = Pick<
-	BridgeServiceData,
-	'connected' | 'lastPushAt' | 'receivedKinds' | 'lastError'
->;
 
 // ==================== 全局声明 ====================
 

@@ -167,6 +167,9 @@ describe('写入收敛（只写 Settings，不再双写 globalState）', () => {
 		await expect(mgr.setWarnThreshold(-0.1)).rejects.toThrow(ConfigValidationError);
 		await expect(mgr.setAfkThreshold(-5)).rejects.toThrow(ConfigValidationError);
 		await expect(mgr.setAfkThreshold(86401)).rejects.toThrow(ConfigValidationError);
+		await expect(mgr.setPollInterval(Number.NaN)).rejects.toThrow(ConfigValidationError);
+		await expect(mgr.setWarnThreshold(Number.POSITIVE_INFINITY)).rejects.toThrow(ConfigValidationError);
+		await expect(mgr.setAfkThreshold(Number.NEGATIVE_INFINITY)).rejects.toThrow(ConfigValidationError);
 	});
 });
 
@@ -217,14 +220,14 @@ describe('写方法互斥（并发读-改-写无丢失更新）', () => {
 
 	it('addService 与 saveServiceAtomic 并发：两次写入的字段都保留', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'svc-1', kind: 'glm', displayName: 'Old', dataSource: 'manual' }],
+			services: [{ id: 'svc-1', kind: 'glm', displayName: 'Old' }],
 		});
 		withDelayedUpdate(mock);
 		const mgr = new ConfigManager(asCtx(mock));
 
 		let addedId = '';
-		const pAdd = mgr.addService('mimo', 'New').then(id => { addedId = id; });
-		const pSave = mgr.saveServiceAtomic('svc-1', { displayName: 'Renamed', kind: 'glm', dataSource: 'manual', key: 'k' });
+		const pAdd = mgr.addService('kimi', 'New').then(id => { addedId = id; });
+		const pSave = mgr.saveServiceAtomic('svc-1', { displayName: 'Renamed', kind: 'glm', key: 'k' });
 		await Promise.all([pAdd, pSave]);
 
 		const profiles = mgr.loadProfiles();
@@ -235,94 +238,131 @@ describe('写方法互斥（并发读-改-写无丢失更新）', () => {
 });
 
 describe('saveServiceAtomic（原子化保存）', () => {
-	it('manual 模式：profile 与 secret 均达到最终态', async () => {
+	it('profile 不存在时直接返回，不写 Secret 或 profiles', async () => {
+		const originalProfiles = [{ id: 'svc-1', kind: 'glm', displayName: 'A' }];
+		const mock = createMockContext({ services: originalProfiles });
+		const secretCalls: string[] = [];
+		let stateWrites = 0;
+		mock.secrets.store = async (key) => { secretCalls.push(`store:${key}`); };
+		mock.secrets.delete = async (key) => { secretCalls.push(`delete:${key}`); };
+		const origUpdate = mock.globalState.update.bind(mock.globalState);
+		mock.globalState.update = async (key: string, value: unknown) => {
+			stateWrites++;
+			return origUpdate(key, value);
+		};
+		const mgr = new ConfigManager(asCtx(mock));
+
+		await expect(
+			mgr.saveServiceAtomic('missing', { displayName: 'New', kind: 'glm', key: 'new-key' })
+		).resolves.toBe(false);
+
+		expect(secretCalls).toEqual([]);
+		expect(stateWrites).toBe(0);
+		expect(mgr.loadProfiles()).toEqual(originalProfiles);
+		await expect(mgr.getKey('missing')).resolves.toBeUndefined();
+	});
+
+	it('保存服务：profile 与 secret 均达到最终态', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'glm-1', kind: 'glm', displayName: 'Old', dataSource: 'manual' }],
+			services: [{ id: 'glm-1', kind: 'glm', displayName: 'Old' }],
 		});
 		const mgr = new ConfigManager(asCtx(mock));
 
-		await mgr.saveServiceAtomic('glm-1', { displayName: 'New', kind: 'glm', dataSource: 'manual', key: 'k-new' });
+		await expect(
+			mgr.saveServiceAtomic('glm-1', { displayName: 'New', kind: 'glm', key: 'k-new' })
+		).resolves.toBe(true);
 
 		const profiles = mgr.loadProfiles();
 		expect(profiles[0]?.displayName).toBe('New');
-		expect(profiles[0]?.dataSource).toBe('manual');
+		expect(profiles[0]).not.toHaveProperty('dataSource');
 		await expect(mgr.getKey('glm-1')).resolves.toBe('k-new');
 	});
 
-	it('kind 变化：旧 key 被清空，manual 模式写入新 key', async () => {
+	it('kind 变化：旧 key 被清空并写入新 key', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'svc-1', kind: 'glm', displayName: 'A', dataSource: 'manual' }],
+			services: [{ id: 'svc-1', kind: 'glm', displayName: 'A' }],
 		});
 		const secretsStore: Record<string, string> = {};
 		mock.secrets.store = async (k, v) => { secretsStore[k] = v; };
 		mock.secrets.get = async (k) => secretsStore[k];
 		mock.secrets.delete = async (k) => { delete secretsStore[k]; };
 		const mgr = new ConfigManager(asCtx(mock));
-		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', dataSource: 'manual', key: 'old-key' });
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', key: 'old-key' });
 
 		// kind 切换为 kimi：旧 key 清空、新 key 落盘
-		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'kimi', dataSource: 'manual', key: 'new-key' });
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'kimi', key: 'new-key' });
 
 		expect(mgr.loadProfiles()[0]?.kind).toBe('kimi');
 		await expect(mgr.getKey('svc-1')).resolves.toBe('new-key');
 	});
 
-	it('dataSource 切换到 bridge：旧 key 被清空且不再写入', async () => {
+	it('空 key 保存时清除旧 Secret', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'svc-1', kind: 'glm', displayName: 'A', dataSource: 'manual' }],
+			services: [{ id: 'svc-1', kind: 'glm', displayName: 'A' }],
 		});
 		const secretsStore: Record<string, string> = {};
 		mock.secrets.store = async (k, v) => { secretsStore[k] = v; };
 		mock.secrets.get = async (k) => secretsStore[k];
 		mock.secrets.delete = async (k) => { delete secretsStore[k]; };
 		const mgr = new ConfigManager(asCtx(mock));
-		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', dataSource: 'manual', key: 'manual-key' });
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', key: 'old-key' });
 
-		// 切换到 bridge：key 清空（Data Bridge 数据源不消费凭证），dataSource 落 state
-		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', dataSource: 'bridge', key: '' });
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', key: '' });
 
-		expect(mgr.loadProfiles()[0]?.dataSource).toBe('bridge');
 		await expect(mgr.getKey('svc-1')).resolves.toBeUndefined();
 	});
 
-	it('bridge 模式无变化：AI 服务总是清除 secret key（Data Bridge 不消费凭证）', async () => {
+	it('mask 映射后的三态：undefined 保留、新 key 替换、空串清除', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'svc-1', kind: 'kimi', displayName: 'A', dataSource: 'bridge' }],
+			services: [{ id: 'svc-1', kind: 'glm', displayName: 'A' }],
 		});
-		let storeCalls = 0;
-		let deleteCalls = 0;
-		mock.secrets.store = async () => { storeCalls++; };
-		mock.secrets.delete = async () => { deleteCalls++; };
-		mock.secrets.get = async () => 'legacy-key';
 		const mgr = new ConfigManager(asCtx(mock));
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', key: 'old-key' });
 
-		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'kimi', dataSource: 'bridge', key: '' });
+		// extension 会把缺失、非 string 和 API_KEY_MASK 都映射为 undefined。
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', key: undefined });
+		await expect(mgr.getKey('svc-1')).resolves.toBe('old-key');
 
-		// 清除遗留 key，幂等可重复执行
-		expect(storeCalls).toBe(0);
-		expect(deleteCalls).toBe(1);
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', key: 'new-key' });
+		await expect(mgr.getKey('svc-1')).resolves.toBe('new-key');
+
+		await mgr.saveServiceAtomic('svc-1', { displayName: 'A', kind: 'glm', key: '' });
+		await expect(mgr.getKey('svc-1')).resolves.toBeUndefined();
 	});
 
-	it('bridge 模式无变化：Bridge 服务自身保留 connected key 语义（不触碰 secret）', async () => {
+	it('endpoint 三态：undefined 保留、新值更新、空串删除，且不牵连 Secret', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'bridge-1', kind: 'bridge', displayName: 'Data Bridge', dataSource: 'bridge' }],
+			services: [{
+				id: 'glm-1',
+				kind: 'glm',
+				displayName: 'GLM',
+				endpoint: 'https://open.bigmodel.cn',
+			}],
 		});
-		let storeCalls = 0;
-		let deleteCalls = 0;
-		mock.secrets.store = async () => { storeCalls++; };
-		mock.secrets.delete = async () => { deleteCalls++; };
-		mock.secrets.get = async () => 'connected';
 		const mgr = new ConfigManager(asCtx(mock));
+		await mgr.saveServiceAtomic('glm-1', { displayName: 'GLM', kind: 'glm', key: 'secret' });
 
-		await mgr.saveServiceAtomic('bridge-1', { displayName: 'Data Bridge', kind: 'bridge', dataSource: 'bridge', key: '' });
+		await mgr.saveServiceAtomic('glm-1', {
+			displayName: 'GLM renamed', kind: 'glm', key: undefined, endpoint: undefined,
+		});
+		expect(mgr.loadProfiles()[0]?.endpoint).toBe('https://open.bigmodel.cn');
+		await expect(mgr.getKey('glm-1')).resolves.toBe('secret');
 
-		expect(storeCalls).toBe(0);
-		expect(deleteCalls).toBe(0);
+		await mgr.saveServiceAtomic('glm-1', {
+			displayName: 'GLM renamed', kind: 'glm', key: undefined, endpoint: 'https://example.com',
+		});
+		expect(mgr.loadProfiles()[0]?.endpoint).toBe('https://example.com');
+
+		await mgr.saveServiceAtomic('glm-1', {
+			displayName: 'GLM renamed', kind: 'glm', key: undefined, endpoint: '',
+		});
+		expect(mgr.loadProfiles()[0]).not.toHaveProperty('endpoint');
+		await expect(mgr.getKey('glm-1')).resolves.toBe('secret');
 	});
 
 	it('secret 写入失败时不落 globalState（旧 profile 保持可用）', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'svc-1', kind: 'glm', displayName: 'Old', dataSource: 'manual' }],
+			services: [{ id: 'svc-1', kind: 'glm', displayName: 'Old' }],
 		});
 		// 让 secrets 写入直接失败，模拟第一次写入（Secret）崩溃
 		const failure = new Error('secret storage unavailable');
@@ -331,19 +371,19 @@ describe('saveServiceAtomic（原子化保存）', () => {
 		const mgr = new ConfigManager(asCtx(mock));
 
 		await expect(
-			mgr.saveServiceAtomic('svc-1', { displayName: 'New', kind: 'kimi', dataSource: 'manual', key: 'k' })
+			mgr.saveServiceAtomic('svc-1', { displayName: 'New', kind: 'kimi', key: 'k' })
 		).rejects.toThrow('secret storage unavailable');
 
 		// state 未被触碰：旧 profile 完整保留
 		const p = mgr.loadProfiles()[0];
 		expect(p?.displayName).toBe('Old');
 		expect(p?.kind).toBe('glm');
-		expect(p?.dataSource).toBe('manual');
+		expect(p).not.toHaveProperty('dataSource');
 	});
 
 	it('displayName 校验失败时抛出且不产生任何写入', async () => {
 		const mock = createMockContext({
-			services: [{ id: 'svc-1', kind: 'glm', displayName: 'A', dataSource: 'manual' }],
+			services: [{ id: 'svc-1', kind: 'glm', displayName: 'A' }],
 		});
 		let stateWrites = 0;
 		const origUpdate = mock.globalState.update.bind(mock.globalState);
@@ -354,7 +394,7 @@ describe('saveServiceAtomic（原子化保存）', () => {
 		const mgr = new ConfigManager(asCtx(mock));
 
 		await expect(
-			mgr.saveServiceAtomic('svc-1', { displayName: '   ', kind: 'glm', dataSource: 'manual', key: 'k' })
+			mgr.saveServiceAtomic('svc-1', { displayName: '   ', kind: 'glm', key: 'k' })
 		).rejects.toThrow(ConfigValidationError);
 		expect(stateWrites).toBe(0);
 	});

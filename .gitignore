@@ -14,14 +14,10 @@ out/
 .vscode-test/
 .eslintcache
 
-# === 打包产物 ===
+# === 通用打包产物 ===
 *.vsix
 *.zip
 build/
-# Firefox web-ext 打包输出目录
-web-ext-artifacts/
-# 注意：chrome/ 与 firefox/ 目录内的构建残留由各自嵌套的
-# .gitignore 白名单拦截（只放行 manifest.json 与 icons/）
 
 # === OS Generated ===
 .DS_Store
@@ -65,17 +61,13 @@ tmp/
 *.orig
 *.rej
 
-# === 密钥与证书（绝不可提交） ===
+# === 密钥与证书（绝不可提交）===
 *.pem
 *.key
-# Chrome 扩展签名打包产物
-*.crx
-
-# === Runtime ===
-# Cookie Bridge PID 端口文件：实际写入 os.tmpdir()/.ai-quota-bridge-port-{pid}
-# 此处防御性忽略，防止调试时落在仓库内
-.ai-quota-bridge-port-*
 
 # === VSCode Workspace Settings ===
-# (用户级个人设置，不应提交；launch.json/tasks.json/extensions.json 为团队共享)
+# 用户级个人设置；launch.json/tasks.json/extensions.json 为团队共享
 .vscode/settings.json
+
+# Deepwork 本地进度文件
+.slim/deepwork/

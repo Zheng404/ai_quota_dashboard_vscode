@@ -18,9 +18,8 @@ export class ConfigValidationError extends Error {
 /**
  * 写操作互斥（模块级串行 Promise 链，进程内所有 ConfigManager 实例共享）。
  * 全部「读-改-写」整表覆写方法（addService/removeService/updateService/
- * updateServiceDataSource/updateServiceKind/saveServiceAtomic/migrateBridgeDataSource）
- * 经此串行执行：并发调用方（refreshQueue 与 bridgeQueue 两条独立队列互相并发）
- * 若各自 load→modify→save，后写者会用旧快照覆盖先写者造成丢失更新。
+ * updateServiceKind/saveServiceAtomic）经此串行执行：并发调用方若各自
+ * load→modify→save，后写者会用旧快照覆盖先写者造成丢失更新。
  * 读方法不加锁，保持并发读取性能。
  */
 let writeMutex: Promise<void> = Promise.resolve();
@@ -35,9 +34,10 @@ function withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
 export interface SaveServiceTarget {
 	displayName: string;
 	kind: ServiceId;
-	dataSource: 'manual' | 'bridge';
-	/** manual 模式下要保存的 key；空字符串表示清除 */
-	key: string;
+	/** undefined 保持原 API Key，空字符串清除，其余字符串替换。 */
+	key?: string;
+	/** undefined 保留原 endpoint，空字符串删除，其余字符串更新。 */
+	endpoint?: string;
 }
 
 /** 配置管理器 — 封装 ExtensionContext 访问，避免模块级可变状态 */
@@ -195,8 +195,7 @@ export class ConfigManager {
 		return withWriteLock(async () => {
 			const profiles = this.loadProfiles();
 			const id = `${kind}-${Date.now()}-${this.nextId++}`;
-			const dataSource = kind === 'bridge' ? 'bridge' : 'manual';
-			profiles.push({ id, kind, displayName: displayName.trim(), dataSource });
+			profiles.push({ id, kind, displayName: displayName.trim() });
 			await this.saveProfiles(profiles);
 			return id;
 		});
@@ -232,16 +231,6 @@ export class ConfigManager {
 		await this.setKey(id, key);
 	}
 
-	/** 更新服务数据来源 */
-	async updateServiceDataSource(id: string, dataSource: 'manual' | 'bridge'): Promise<void> {
-		return withWriteLock(async () => {
-			const profiles = this.loadProfiles();
-			const p = profiles.find(x => x.id === id);
-			if (!p) { return; }
-			p.dataSource = dataSource;
-			await this.saveProfiles(profiles);
-		});
-	}
 
 	/** 更新服务类型（同时清空 key） */
 	async updateServiceKind(id: string, kind: ServiceId): Promise<void> {
@@ -269,62 +258,55 @@ export class ConfigManager {
 	 *   反向顺序（先 state 后 Secret）在 Secret 写失败时会丢掉用户刚输入的 key，
 	 *   且用户以为已保存成功——丢 key 比留孤立 Secret 更糟，故 Secret 先行。
 	 */
-	async saveServiceAtomic(id: string, target: SaveServiceTarget): Promise<void> {
+	async saveServiceAtomic(id: string, target: SaveServiceTarget): Promise<boolean> {
 		this.validateDisplayName(target.displayName);
 		return withWriteLock(async () => {
 			const profiles = this.loadProfiles();
 			const p = profiles.find(x => x.id === id);
+			if (!p) { return false; }
 			const kindChanged = !!p && p.kind !== target.kind;
-			const dataSourceChanged = !!p && p.dataSource !== target.dataSource;
 
-			// ---- 计算最终 Secret 内容（与旧多步写入的最终态等价）----
-			// undefined = 不触碰现有 Secret；'' = 删除；非空 = 存储
-			let finalSecret: string | undefined;
-			if (target.dataSource === 'manual') {
-				// manual 模式总是覆盖写入用户输入的 key（空则删除），与旧逻辑一致
-				finalSecret = target.key;
-			} else if (target.kind === 'bridge') {
-				// Bridge 服务自身：保留 'connected' key 语义，仅在 kind/数据来源变化时清空
-				finalSecret = (kindChanged || dataSourceChanged) ? '' : undefined;
-			} else {
-				// Data Bridge 数据源的 AI 服务：数据由浏览器扩展推送，本端不消费凭证，
-				// 总是清除 Secret key（含旧版本遗留的推送凭证）
-				finalSecret = '';
+			// 第一次写入 Secret：undefined 完全不动，空字符串删除，其余字符串替换。
+			// 失败则抛出，globalState 不落盘，旧配置保持可用。
+			if (target.key !== undefined) {
+				await this.setKey(id, target.key);
 			}
 
-			// ---- 第一次写入：Secret（失败则抛出，state 不落，旧配置保持可用）----
-			if (finalSecret !== undefined) {
-				await this.setKey(id, finalSecret);
-			}
-
-			// ---- 第二次写入：globalState（displayName/kind/dataSource 一次性落盘）----
-			if (p && (kindChanged || dataSourceChanged || p.displayName !== target.displayName.trim())) {
+			const endpointChanged = !!p && target.endpoint !== undefined &&
+				(target.endpoint === '' ? p.endpoint !== undefined : p.endpoint !== target.endpoint);
+			// 第二次写入 globalState：displayName/kind/endpoint 一次性落盘。
+			if (p && (kindChanged || p.displayName !== target.displayName.trim() || endpointChanged)) {
 				p.displayName = target.displayName.trim();
 				p.kind = target.kind;
-				p.dataSource = target.dataSource;
+				if (target.endpoint === '') {
+					delete p.endpoint;
+				} else if (target.endpoint !== undefined) {
+					p.endpoint = target.endpoint;
+				}
 				await this.saveProfiles(profiles);
 			}
+			return true;
 		});
 	}
 
 	// ==================== 全局设置 ====================
 
 	async setPollInterval(sec: number): Promise<void> {
-		if (sec < 0 || sec > 86400) {
+		if (!Number.isFinite(sec) || sec < 0 || sec > 86400) {
 			throw new ConfigValidationError('刷新间隔必须在 0 ~ 86400 秒之间');
 		}
 		await this.writeGlobalSetting('refreshInterval', sec);
 	}
 
 	async setWarnThreshold(val: number): Promise<void> {
-		if (val < 0 || val > 1) {
+		if (!Number.isFinite(val) || val < 0 || val > 1) {
 			throw new ConfigValidationError('预警阈值必须在 0 ~ 1 之间');
 		}
 		await this.writeGlobalSetting('warnThreshold', val);
 	}
 
 	async setAfkThreshold(sec: number): Promise<void> {
-		if (sec < 0 || sec > 86400) {
+		if (!Number.isFinite(sec) || sec < 0 || sec > 86400) {
 			throw new ConfigValidationError('AFK 阈值必须在 0 ~ 86400 秒之间');
 		}
 		await this.writeGlobalSetting('afkThreshold', sec);
@@ -337,23 +319,6 @@ export class ConfigManager {
 		// Intentionally empty — 保持向后兼容，未来可在此添加迁移逻辑
 	}
 
-	/** 设置所有 bridge 模式服务的数据来源（用于新架构下默认启用 bridge） */
-	async migrateBridgeDataSource(): Promise<void> {
-		return withWriteLock(async () => {
-			const profiles = this.loadProfiles();
-			let changed = false;
-			for (const p of profiles) {
-				// 旧数据可能没有 dataSource 字段，默认视为 manual 保持兼容
-				if (!p.dataSource) {
-					p.dataSource = 'manual';
-					changed = true;
-				}
-			}
-			if (changed) {
-				await this.saveProfiles(profiles);
-			}
-		});
-	}
 }
 
 // ==================== 兼容层（单例导出，供现有代码平滑迁移） ====================
@@ -385,11 +350,9 @@ export async function addService(kind: ServiceId, displayName: string): Promise<
 export async function removeService(id: string): Promise<void> { return getManager().removeService(id); }
 export async function updateService(id: string, updates: Partial<Omit<ServiceProfile, 'id' | 'kind'>>): Promise<void> { return getManager().updateService(id, updates); }
 export async function updateServiceKey(id: string, key: string): Promise<void> { return getManager().updateServiceKey(id, key); }
-export async function updateServiceDataSource(id: string, dataSource: 'manual' | 'bridge'): Promise<void> { return getManager().updateServiceDataSource(id, dataSource); }
 export async function updateServiceKind(id: string, kind: ServiceId): Promise<void> { return getManager().updateServiceKind(id, kind); }
-export async function saveServiceAtomic(id: string, target: SaveServiceTarget): Promise<void> { return getManager().saveServiceAtomic(id, target); }
+export async function saveServiceAtomic(id: string, target: SaveServiceTarget): Promise<boolean> { return getManager().saveServiceAtomic(id, target); }
 export async function setPollInterval(sec: number): Promise<void> { return getManager().setPollInterval(sec); }
 export async function setWarnThreshold(val: number): Promise<void> { return getManager().setWarnThreshold(val); }
 export async function setAfkThreshold(sec: number): Promise<void> { return getManager().setAfkThreshold(sec); }
 export async function initDefaults() { return getManager().initDefaults(); }
-export async function migrateBridgeDataSource() { return getManager().migrateBridgeDataSource(); }

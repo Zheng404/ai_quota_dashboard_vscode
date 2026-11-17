@@ -1,27 +1,42 @@
 import * as vscode from 'vscode';
-import { ServiceData, UsagePoint, ServiceProfile } from '../core/types';
+import { isFreshServiceData, ServiceData, UsagePoint, ServiceProfile } from '../core/types';
 
 const STORAGE_KEY = 'aiQuotaDashboard.history';
 const MAX_DAYS = 30; // 最多保留30天的历史数据
 
 interface StoredHistory {
-	[serviceId: string]: UsagePoint[];
+	[serviceId: string]: unknown;
+}
+
+function isStoredHistory(value: unknown): value is StoredHistory {
+	if (value === null || typeof value !== 'object' || Array.isArray(value)) { return false; }
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+function toUsagePoints(value: unknown): UsagePoint[] {
+	if (!Array.isArray(value)) { return []; }
+	return value.filter((point: unknown): point is UsagePoint => {
+		if (point === null || typeof point !== 'object' || Array.isArray(point)) { return false; }
+		const at = (point as { at?: unknown }).at;
+		return typeof at === 'number' && Number.isFinite(at);
+	});
 }
 
 /**
  * 从 globalState 读取历史数据
  */
 export function loadHistory(ctx: vscode.ExtensionContext): Map<string, UsagePoint[]> {
-	const raw = ctx.globalState.get<StoredHistory>(STORAGE_KEY, {});
+	const raw = ctx.globalState.get<unknown>(STORAGE_KEY, {});
 	const map = new Map<string, UsagePoint[]>();
 	// 防御：globalState 值被外部写坏为 null/数组等非纯对象时，Object.entries 会抛 TypeError 拖垮拉取流程
-	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+	if (!isStoredHistory(raw)) {
 		console.warn('[AI Quota Dashboard] 历史数据存储格式非法，已按空历史处理');
 		return map;
 	}
 	try {
 		for (const [sid, pts] of Object.entries(raw)) {
-			map.set(sid, pts);
+			map.set(sid, toUsagePoints(pts));
 		}
 	} catch (e) {
 		console.warn('[AI Quota Dashboard] 历史数据读取失败，已按空历史处理', e);
@@ -38,21 +53,26 @@ export async function saveHistory(
 	dataMap: Map<string, ServiceData>,
 	profiles?: ServiceProfile[]
 ): Promise<void> {
-	const existing = ctx.globalState.get<StoredHistory>(STORAGE_KEY, {});
+	const rawExisting = ctx.globalState.get<unknown>(STORAGE_KEY, {});
+	// 与 loadHistory 一致：结构损坏按空历史处理，但不拦截 globalState.update 的真实写失败。
+	const existing: StoredHistory = isStoredHistory(rawExisting) ? rawExisting : {};
 	const now = Date.now();
 	const cutoff = now - MAX_DAYS * 24 * 60 * 60 * 1000;
 
 	const merged: StoredHistory = {};
+	const activeIds = new Set(profiles?.map(p => p.id) ?? Array.from(dataMap.keys()));
 
 	for (const [sid, data] of dataMap) {
-		if (data.err) { continue; }
+		if (!activeIds.has(sid)) { continue; }
+		// 缺 Key 与 stale-while-error 都不是新鲜配额样本，即使保留了旧 slots 也不能写入历史。
+		if (!isFreshServiceData(data)) { continue; }
 		if (data.slots.length === 0) { continue; }
 
-		const pts: UsagePoint[] = existing[sid] ?? [];
+		const pts = toUsagePoints(existing[sid]);
 
 		// 计算当前用量并打标语义：主槽有绝对量 used 记 'tokens'；
 		// 无 used 回退 percent 时记 'percent'（GLM TOKENS_LIMIT 曲线实际记录 0-100 百分比，
-		// 与 Kimi/MiMo 的绝对量不再混同语义）
+		// 与 Kimi 的绝对量不混同语义）
 		const mainSlot = data.slots[0];
 		const pointKind: UsagePoint['kind'] = mainSlot?.used != null ? 'tokens' : 'percent';
 		const used = mainSlot?.used ?? mainSlot?.percent ?? 0;
@@ -74,13 +94,12 @@ export async function saveHistory(
 	}
 
 	// 保留未更新的服务的历史数据（如果仍在配置中）
-	const activeIds = new Set(profiles?.map(p => p.id) ?? Array.from(dataMap.keys()));
 	for (const [sid, pts] of Object.entries(existing)) {
 		if (!activeIds.has(sid)) {
 			continue; // 服务已删除，清理其历史数据
 		}
 		if (!merged[sid]) {
-			merged[sid] = pts.filter(p => p.at >= cutoff);
+			merged[sid] = toUsagePoints(pts).filter(p => p.at >= cutoff);
 		}
 	}
 
@@ -96,7 +115,7 @@ export function attachHistory(
 	historyMap: Map<string, UsagePoint[]>
 ): ServiceData {
 	const apiHistory = data.history ?? [];
-	const savedHistory = historyMap.get(data.id) ?? [];
+	const savedHistory = toUsagePoints(historyMap.get(data.id));
 
 	if (savedHistory.length === 0) {
 		// 没有持久化历史，保留 API 返回的

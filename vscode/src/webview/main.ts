@@ -1,156 +1,162 @@
-// Webview bundle 入口：卡片注册 + 消息路由 + 渲染调度 + 事件绑定
-//
-// 1:1 迁移自 dashboard/templates/{settings.ts 字符串尾部执行段}：
-// 原 inline IIFE 的执行顺序保持不变（卡片注册 → Tab 切换绑定 → 点击委托 →
-// 消息监听 → 请求初始数据），仅增加类型注解与模块化
+// Webview bundle 入口：卡片注册、消息路由、可访问标签页与渲染调度
 
-import type { BridgeServiceData } from '../services/bridge/types';
-import type { BridgeStateView, ExtToWebviewMessage, UpdateDataMessage, WebviewServiceData } from './types';
-import { renderNoConfig, renderService, vscodeApi } from './shared';
-import { registerGlmCard } from './cards/glm';
+import type { ExtToWebviewMessage, UpdateDataMessage } from './types';
+import { computeVisibleServices, pruneStatesByProfiles, shouldSkipPanelRerender } from './compute';
+import { bindTabKeyboard, renderNoConfig, renderService, vscodeApi } from './shared';
+import { glmStates, registerGlmCard } from './cards/glm';
 import { registerKimiCard } from './cards/kimi';
-import { registerMimoCard } from './cards/mimo';
-import { bindAddService, bindGlobalEvents, bindServiceEvents, renderGlobalSettings, renderServiceListSettings } from './settings';
-
-// ====== 卡片注册（bundle 内置注册表唯一分发，全部卡片均已 TS 化） ======
+import { bindAddService, bindGlobalEvents, bindServiceEvents, handleSaveGlobalResult, renderGlobalSettings, renderServiceListSettings } from './settings';
 
 registerGlmCard();
 registerKimiCard();
-registerMimoCard();
+bindTabKeyboard();
 
-// ====== 仪表盘卡片刷新按钮绑定（updateData 渲染后调用） ======
+let lastUpdateMessage: UpdateDataMessage | undefined;
+let servicesPanelHash = '';
+let globalPanelHash = '';
+let activeRefreshingIds = new Set<string>();
 
-function bindRefreshButtons(): void {
-	// 单服务刷新按钮
-	document.querySelectorAll<HTMLElement>('.btn-refresh-svc').forEach(el => {
-		el.addEventListener('click', () => {
-			el.classList.add('spinning');
-			vscodeApi.postMessage({ command: 'refreshService', data: { id: el.dataset.serviceId } });
-		});
+function announce(message: string): void {
+	const region = document.getElementById('dashboard-announcer');
+	if (region) region.textContent = message;
+}
+
+// ====== 顶级标签页 ======
+
+function activateTopTab(button: HTMLElement): void {
+	const tab = button.dataset.tab ?? 'dashboard';
+	document.querySelectorAll<HTMLElement>('.tab-btn').forEach(tabButton => {
+		const selected = tabButton === button;
+		tabButton.classList.toggle('active', selected);
+		tabButton.setAttribute('aria-selected', String(selected));
+		tabButton.tabIndex = selected ? 0 : -1;
+	});
+	document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
+		const selected = panel.id === 'panel-' + tab;
+		panel.classList.toggle('active', selected);
+		panel.hidden = !selected;
+	});
+	// 设置面板在重新进入时按最新数据渲染；输入焦点保护仍由 handleUpdateData 执行。
+	servicesPanelHash = '';
+	globalPanelHash = '';
+	if (lastUpdateMessage) handleUpdateData(lastUpdateMessage);
+}
+
+document.querySelectorAll<HTMLElement>('.tab-btn').forEach(button => {
+	button.addEventListener('click', () => activateTopTab(button));
+});
+
+// ====== 刷新、空态动作与帮助（事件委托，不随 innerHTML 重渲染失效） ======
+
+function applyRefreshingState(): void {
+	document.querySelectorAll<HTMLButtonElement>('.btn-refresh-svc').forEach(button => {
+		const id = button.dataset.serviceId ?? '';
+		const name = button.dataset.serviceName ?? '服务';
+		const refreshing = activeRefreshingIds.has(id);
+		button.classList.toggle('spinning', refreshing);
+		button.setAttribute('aria-disabled', String(refreshing));
+		button.setAttribute('aria-busy', String(refreshing));
+		button.setAttribute('aria-label', (refreshing ? '正在刷新 ' : '刷新 ') + name);
+		button.title = (refreshing ? '正在刷新 ' : '刷新 ') + name;
+		const card = button.closest<HTMLElement>('[data-service-card]');
+		if (card) card.setAttribute('aria-busy', String(refreshing || card.classList.contains('loading-card')));
+		const state = card?.querySelector<HTMLElement>('[data-refresh-state]');
+		if (state) state.hidden = !refreshing;
 	});
 }
 
-// ====== Tab 切换 ======
-// 三个顶级 tab：仪表盘 / 服务 / 设置，通过 data-tab 切换对应 panel
+document.addEventListener('click', event => {
+	const target = event.target;
+	if (!(target instanceof Element)) return;
 
-/** 最近一次 updateData 消息（切换 tab 时强制重渲染用，保证显示最新数据） */
-let lastUpdateMessage: UpdateDataMessage | undefined;
-
-document.querySelectorAll<HTMLElement>('.tab-btn').forEach(btn => {
-	btn.addEventListener('click', () => {
-		document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-		document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-		btn.classList.add('active');
-		const tab = btn.dataset.tab ?? 'dashboard';
-		document.getElementById('panel-' + tab)?.classList.add('active');
-		// 切换 tab 时强制重渲染一次设置类 panel，保证显示最新数据
-		servicesPanelHash = '';
-		globalPanelHash = '';
-		if (lastUpdateMessage) { handleUpdateData(lastUpdateMessage); }
-	});
-});
-
-// 帮助按钮 + 删除按钮（委托，不受 innerHTML 替换影响）
-document.addEventListener('click', (e) => {
-	const target = e.target as HTMLElement;
-	if (target?.classList?.contains('svc-help-btn')) {
-		vscodeApi.postMessage({ command: target.dataset.helpCmd ?? '' });
+	const refreshButton = target.closest<HTMLButtonElement>('.btn-refresh-svc');
+	if (refreshButton) {
+		if (refreshButton.getAttribute('aria-disabled') === 'true') return;
+		const id = refreshButton.dataset.serviceId;
+		if (!id) return;
+		activeRefreshingIds.add(id);
+		applyRefreshingState();
+		announce('正在刷新 ' + (refreshButton.dataset.serviceName ?? '服务'));
+		vscodeApi.postMessage({ command: 'refreshService', data: { id } });
+		return;
 	}
-	if (target?.classList?.contains('remove-service-btn')) {
-		const item = target.closest<HTMLElement>('.service-item');
-		if (item) {
-			vscodeApi.postMessage({ command: 'removeService', data: { id: item.dataset.id } });
+
+	const switchButton = target.closest<HTMLElement>('[data-switch-tab]');
+	if (switchButton) {
+		const tabName = switchButton.dataset.switchTab ?? 'dashboard';
+		const serviceId = switchButton.dataset.focusServiceId;
+		const tab = Array.from(document.querySelectorAll<HTMLElement>('.tab-btn')).find(button => button.dataset.tab === tabName);
+		if (tab) {
+			tab.click();
+			if (serviceId) {
+				const serviceItem = Array.from(document.querySelectorAll<HTMLElement>('.service-item')).find(item => item.dataset.id === serviceId);
+				serviceItem?.querySelector<HTMLInputElement>('.svc-key')?.focus();
+			} else {
+				document.getElementById(tabName === 'services' ? 'new-service-kind' : 'panel-' + tabName)?.focus();
+			}
 		}
+		return;
 	}
+
+	const helpButton = target.closest<HTMLElement>('.svc-help-btn');
+	if (helpButton) vscodeApi.postMessage({ command: helpButton.dataset.helpCmd ?? '' });
 });
 
 // ====== 接收数据更新（渲染调度） ======
 
-/** 服务/全局设置面板上次渲染时的数据指纹（JSON 序列化比较，数据量小，KISS）。
- *  空串表示「待强制渲染」（首次渲染或刚切换过 tab）。 */
-let servicesPanelHash = '';
-let globalPanelHash = '';
-
-/** 目标面板内是否正有输入控件持有焦点（用户正在编辑，此时重渲染会冲掉输入） */
 function isEditingInPanel(panel: HTMLElement | null): boolean {
-	if (!panel) { return false; }
-	const ae = document.activeElement;
-	if (!(ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement || ae instanceof HTMLSelectElement)) {
-		return false;
-	}
-	return panel.contains(ae);
+	if (!panel) return false;
+	const active = document.activeElement;
+	if (!(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement)) return false;
+	return panel.contains(active);
 }
 
-/** updateData 消息处理：仪表盘每轮正常重渲染（无缝刷新）；
- *  服务/全局设置面板含输入框，仅在数据确实变化且用户未在编辑时才重渲染 */
+function captureDashboardFocus(panel: HTMLElement): string | undefined {
+	const active = document.activeElement;
+	return active instanceof HTMLElement && panel.contains(active) ? active.dataset.focusKey : undefined;
+}
+
+function restoreDashboardFocus(panel: HTMLElement, focusKey: string | undefined): void {
+	if (!focusKey) return;
+	const target = Array.from(panel.querySelectorAll<HTMLElement>('[data-focus-key]')).find(el => el.dataset.focusKey === focusKey);
+	target?.focus({ preventScroll: true });
+}
+
 function handleUpdateData(message: UpdateDataMessage): void {
-	const services = message.services;
 	const settings = message.settings;
 	lastUpdateMessage = message;
+	pruneStatesByProfiles(glmStates, settings.profiles);
+	const previousRefreshingIds = activeRefreshingIds;
+	activeRefreshingIds = new Set(message.refreshingIds ?? []);
 
 	const dashboardPanel = document.getElementById('panel-dashboard');
 	if (dashboardPanel) {
-		// 后端权威驱动的刷新状态：哪些服务正在刷新（按钮转圈）
-		const refreshingSet = new Set(message.refreshingIds ?? []);
+		const focusKey = captureDashboardFocus(dashboardPanel);
+		const visibleServices = computeVisibleServices(settings.profiles, message.services);
 
-		// 基于 profiles 渲染卡片框架，保证服务列表变化即时反映；
-		// 用 services 填充实际数据。无缝刷新：有数据用真实数据，无数据用加载骨架卡。
-		// Data Bridge 卡片不在仪表盘显示，其状态展示在「服务」标签页顶部。
-		const profiles = (settings.profiles ?? []).filter(p => p.kind !== 'bridge');
-		const servicesMap = new Map<string, WebviewServiceData>();
-		(services || []).forEach(s => servicesMap.set(s.id, s));
+		dashboardPanel.innerHTML = visibleServices.length > 0
+			? visibleServices.map(service => renderService(service)).join('')
+			: renderNoConfig();
+		applyRefreshingState();
+		restoreDashboardFocus(dashboardPanel, focusKey);
+	}
 
-		const visibleServices: WebviewServiceData[] = profiles.map(p => {
-			const data = servicesMap.get(p.id);
-			if (data) return data;
-			// 占位：服务存在但暂无数据 —— 显示轻量加载骨架卡（保留卡片框架，非错误卡）
-			return {
-				id: p.id,
-				name: p.displayName,
-				kind: p.kind,
-				slots: [],
-				updatedAt: Date.now(),
-				_loading: true,
-			};
-		});
-
-		const hasConfig = visibleServices.length > 0;
-		dashboardPanel.innerHTML = hasConfig ? visibleServices.map(s => renderService(s)).join('') : renderNoConfig();
-		bindRefreshButtons();
-
-		// 按后端 refreshingIds 标记正在刷新的服务按钮（转圈）
-		refreshingSet.forEach(id => {
-			const btn = document.querySelector('.btn-refresh-svc[data-service-id="' + id + '"]');
-			if (btn) btn.classList.add('spinning');
-		});
+	for (const id of previousRefreshingIds) {
+		if (!activeRefreshingIds.has(id)) {
+			const profile = settings.profiles.find(item => item.id === id);
+			if (profile) announce(profile.displayName + ' 刷新结束');
+		}
 	}
 
 	const servicesPanel = document.getElementById('panel-services');
 	if (servicesPanel) {
-		// 提取 Bridge 状态数据（连接状态、最后同步、已接收数据种类），传给服务列表
-		// 用于在 Data Bridge 服务条目内整合展示，而非独立卡片。
-		let bridgeState: BridgeStateView | null = null;
-		const bridgeProfile = (settings.profiles ?? []).find(p => p.kind === 'bridge');
-		if (bridgeProfile) {
-			const servicesMap = new Map<string, WebviewServiceData>();
-			(services || []).forEach(s => servicesMap.set(s.id, s));
-			const bd = servicesMap.get(bridgeProfile.id) as BridgeServiceData | undefined;
-			bridgeState = bd ? {
-				connected: bd.connected,
-				lastPushAt: bd.lastPushAt,
-				receivedKinds: bd.receivedKinds ?? [],
-				lastError: bd.lastError,
-			} : { connected: false, receivedKinds: [] };
-		}
-		// 设置类 panel 条件重渲染：数据指纹变化 且 用户未在面板内编辑输入框。
-		// 轮询刷新每轮都会推 updateData，无条件 innerHTML 会冲掉正在输入的 API Key/名称。
-		const servicesHash = JSON.stringify({
-			profiles: settings.profiles,
-			keys: settings.keys,
-			bridge: bridgeState,
-		});
-		if (servicesHash !== servicesPanelHash && !isEditingInPanel(servicesPanel)) {
-			servicesPanel.innerHTML = renderServiceListSettings(settings, bridgeState);
+		const servicesHash = JSON.stringify({ profiles: settings.profiles, keys: settings.keys });
+		const skipRerender = shouldSkipPanelRerender(
+			isEditingInPanel(servicesPanel),
+			servicesPanel.querySelector('[data-confirm-panel]:not([hidden])') !== null,
+		);
+		if (servicesHash !== servicesPanelHash && !skipRerender) {
+			servicesPanel.innerHTML = renderServiceListSettings(settings);
 			servicesPanelHash = servicesHash;
 			bindServiceEvents();
 			bindAddService();
@@ -159,9 +165,12 @@ function handleUpdateData(message: UpdateDataMessage): void {
 
 	const globalPanel = document.getElementById('panel-global');
 	if (globalPanel) {
-		// 同上：仅在数据变化且未编辑时重渲染，避免轮询冲掉全局设置输入
 		const globalHash = JSON.stringify(settings);
-		if (globalHash !== globalPanelHash && !isEditingInPanel(globalPanel)) {
+		const skipRerender = shouldSkipPanelRerender(
+			isEditingInPanel(globalPanel),
+			globalPanel.querySelector('[data-confirm-panel]:not([hidden])') !== null,
+		);
+		if (globalHash !== globalPanelHash && !skipRerender) {
 			globalPanel.innerHTML = renderGlobalSettings(settings);
 			globalPanelHash = globalHash;
 			bindGlobalEvents();
@@ -169,20 +178,22 @@ function handleUpdateData(message: UpdateDataMessage): void {
 	}
 }
 
-window.addEventListener('message', (event) => {
+window.addEventListener('message', event => {
 	const message = event.data as ExtToWebviewMessage;
-
 	if (message.command === 'switchToSettings') {
-		// tab 已扁平化：subtab 取值为 'services' / 'global'，直接对应顶级 tab
-		const targetTab = document.querySelector('.tab-btn[data-tab="' + (message.subtab ?? 'services') + '"]');
-		if (targetTab) (targetTab as HTMLElement).click();
+		const subtab = message.subtab ?? 'services';
+		const targetTab = Array.from(document.querySelectorAll<HTMLElement>('.tab-btn')).find(button => button.dataset.tab === subtab);
+		if (targetTab) {
+			targetTab.click();
+			targetTab.focus();
+		}
 		return;
 	}
-
-	if (message.command !== 'updateData') return;
-
-	handleUpdateData(message);
+	if (message.command === 'saveGlobalResult') {
+		handleSaveGlobalResult(message);
+		return;
+	}
+	if (message.command === 'updateData') handleUpdateData(message);
 });
 
-// ====== 请求初始数据 ======
 vscodeApi.postMessage({ command: 'requestInitialData' });

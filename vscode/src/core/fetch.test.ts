@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import * as http from 'http';
-import { httpRequest, HttpError } from './fetch';
+import { getJson, httpRequest, HttpError, postJson } from './fetch';
 
 /** 拉起一个可控行为的本地 HTTP 服务器（真实 socket，测试超时/上限语义） */
 interface TestServer {
@@ -102,4 +102,58 @@ describe('fetch.ts 总时长上限与响应体上限', () => {
 		})).rejects.toThrow(/请求总时长超限/);
 		expect(attempts).toBe(3); // 首次 + 2 次重试
 	}, 10000);
+
+	it.each(['GET', 'POST'] as const)('%s 的 2xx text/html 响应抛出不含 body 的安全错误', async (method) => {
+		const responseBody = '<html>secret-response-body</html>';
+		const server = await useServer((_req, res) => {
+			res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+			res.end(responseBody);
+		});
+		const url = `http://127.0.0.1:${server.port}/html`;
+		const request = method === 'GET'
+			? getJson(url)
+			: postJson(url, {}, '{}');
+
+		const err = await request.catch((e: unknown) => e as HttpError) as HttpError;
+		expect(err).toBeInstanceOf(Error);
+		expect(err.message).toBe('响应 Content-Type 非 JSON');
+		expect(err.message).not.toContain(responseBody);
+		expect(err.responseBody).toBeUndefined();
+	});
+
+	it('2xx 缺失 Content-Type 时抛出安全错误', async () => {
+		const server = await useServer((_req, res) => {
+			res.writeHead(200);
+			res.end('{"ok":true}');
+		});
+
+		const err = await getJson(`http://127.0.0.1:${server.port}/missing-content-type`)
+			.catch((e: unknown) => e as HttpError) as HttpError;
+		expect(err.message).toBe('响应缺少 JSON Content-Type');
+		expect(err.message).not.toContain('{"ok":true}');
+		expect(err.responseBody).toBeUndefined();
+	});
+
+	it('兼容带 charset 的 +json Content-Type', async () => {
+		const server = await useServer((_req, res) => {
+			res.writeHead(200, { 'Content-Type': 'application/problem+json; charset=utf-8' });
+			res.end('{"ok":true}');
+		});
+
+		await expect(getJson<{ ok: boolean }>(`http://127.0.0.1:${server.port}/vendor-json`))
+			.resolves.toEqual({ ok: true });
+	});
+
+	it('非法 JSON 的错误 message 不包含响应 body', async () => {
+		const responseBody = '{"secret": invalid-json}';
+		const server = await useServer((_req, res) => {
+			res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+			res.end(responseBody);
+		});
+
+		const err = await getJson(`http://127.0.0.1:${server.port}/invalid-json`)
+			.catch((e: unknown) => e as HttpError) as HttpError;
+		expect(err.message).toBe('JSON parse error');
+		expect(err.message).not.toContain(responseBody);
+	});
 });

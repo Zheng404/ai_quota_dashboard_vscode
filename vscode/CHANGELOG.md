@@ -2,6 +2,57 @@
 
 > 本项目遵循 [Keep a Changelog](https://keepachangelog.com/) 规范，版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+## [2.0.0] - 2026-11-17
+
+### 破坏性变更 (Breaking Changes)
+
+- **收敛为仅 VSCode 扩展**：完整移除浏览器插件及其共享代码、平台清单、构建脚本、产物与 CI/release 任务；发布资产仅保留 VSIX。
+- **移除 Data Bridge**：删除本地数据接收服务器、协议、Bridge 服务、相关 Webview/设置/状态栏分支和测试；不再存在浏览器推送或其他自动数据来源。
+- **移除 MiMo 支持**：删除 MiMo Provider、卡片、样式、设置、状态栏、测试和 API 文档；内置服务仅保留 GLM Coding Plan (CN) 与 Kimi Membership。
+- **认证仅保留手动 API Key**：`ServiceProfile.dataSource` 及运行时分支删除。GLM 使用手动 API Key，Kimi 仅使用 `sk-` 前缀 Code API Key。
+- **旧数据一次性清理**：2.0 首次激活时自动删除旧 Data Bridge、MiMo 与 bridge-fed GLM/Kimi profile，以及这些 profile 对应的 Secret 和历史；同时清理孤儿历史、旧 Bridge 状态与旧 Bridge 迁移标记。
+
+### 新增 (Added)
+
+- **Kimi 新版配额响应支持**：解析 `usages.limit_5h` / `limit_7d` / `limit_month_total` / `limit_month_code`，`used_ratio` 按 0–1 比例处理并兼容数字字符串，`reset_time` 复用时间解析。
+- **Kimi 可选月度槽**：接口返回有效月度总额或 Coding 比例池时追加对应槽位；字段缺失或非法时不显示月度，不伪造 0%，不假设所有账号都有月度配额。
+- **Kimi 真实旧响应兼容**：旧 `usage` / `limits` 继续支持，并补齐 `limits[].window` / `detail` 嵌套及 `resetTime`；旧 5h/7d 计数窗口保持主选，新比例池仅在对应旧窗口不可用时回退。全部窗口缺失或无效时抛出结构异常。
+- **Kimi Membership 等级徽章与降级提示**：使用同一 API Key 并行请求 `/coding/v1/me`，将 `user_level_name` 显示为「会员 · 等级」头部徽章；会员请求失败或字段为空时，正常配额卡显示「会员等级暂不可用，配额不受影响」，不影响配额获取。
+- **仪表盘可访问性与交互优化**：统一原生紧凑布局、共享图标与状态样式，补齐键盘标签导航、ARIA、表单标签、可见焦点、reduced-motion 和窄栏适配；加载、错误、空态及危险操作均有明确反馈，页内确认不再重复触发原生确认框。
+
+### 变更 (Changed)
+
+- **2.0 清理迁移**：`activate()` 在读取 profiles 和启动轮询前等待清理完成；保留 manual GLM/Kimi profile、Secret 和历史并剥离遗留 `dataSource`，来源不明的早期 GLM/Kimi 与未知 kind 保守保留。清理标记最后写入，失败可在下次激活幂等重试。
+- **GLM 详情合并归位**：`mergeDetailRanges()` 迁至 `src/services/glm/detailRanges.ts`，继续在全局刷新时保留已懒加载的 week/month 详情；相关测试同步迁移。
+- **GLM 请求并行化**：配额、订阅及当日模型/工具详情四个独立请求同批发起，保持原有错误降级和返回结构。
+- **工程边界精简**：服务注册表与 Webview 卡片注册仅 GLM/Kimi；package 升级为 2.0.0，开发、构建、测试与发布流程仅面向 VSCode。
+- **发布类型门禁**：新增 `typecheck:webview` 并接入 CI 与 `vscode:prepublish`，防止仅检查 Extension 就将 Webview 类型错误带入 VSIX；补齐 GLM 核心解析与 Webview 纯逻辑测试，Lint 达到零警告。
+- **Release 完整质量门禁**：Release 在 compile 后按 lint → `typecheck:webview` → test → build → package 顺序执行，任一失败均阻断 VSIX 打包、Artifact 上传与后续发布，不再只凭编译和打包发布。
+- **缺 Key 与 stale-while-error 状态**：`ServiceData` 新增 `noKey` 和 `staleError`。缺 Key 显示独立配置卡且不发请求、不缓存；刷新失败但存在旧正常快照时保留 slots、GLM 详情、历史与原 `updatedAt`，显示过期提示和重试，不再直接清空为错误卡。stale 使用 300 秒错误缓存，成功后自动恢复新鲜状态。
+- **GLM 详情状态与可访问性**：新增按范围保存的 `detailStates`（loading/ok/error），请求按 `serviceId:range` 去重，空响应、模型与工具数据同时缺失或异常均进入可重试错误态；全局刷新保留范围状态，完成时基于最新快照合并。详情面板以复合 `aria-labelledby` 同时关联当前用量类型和时间范围标签，并同步加载语义。
+- **Kimi 官方 CN/Global endpoint**：服务设置可编辑 `https://api.kimi.com` 或 `https://api.kimi.ai`，usages 与 me 始终共用归一化官方 HTTPS origin；非法、非官方或不安全 endpoint 回退 CN 默认站，不将 Key 发往自定义第三方主机。
+- **Key 掩码与 endpoint 保存契约**：设置页只接收 `API_KEY_MASK` 或空串，明文 Secret 仅在 Extension Host 内读取并用于 API 请求。Key 与 endpoint 均遵循 undefined 保留、空串清除、新值替换；GLM 未渲染 endpoint 控件时不提交该字段，保留已有配置。掩码只用于显示，不是加密值。
+- **全局设置校验反馈**：Webview 增加空值、有限数字、范围和步长预检；Extension 在三项全部通过后才写 Settings，并通过 `saveGlobalResult` 返回成功或字段级失败，设置页显示对应字段错误，不再静默替换空值或在校验未完成时开始部分写入。
+- **Provider 安全降级日志**：`QuotaProvider.fetch()` 与 `DetailProvider.fetchDetail()` 支持可选 logger；GLM 订阅/模型/工具与 Kimi 会员等级降级记录安全错误 message，不记录 Key、Authorization、`responseBody` 或个人资料。
+- **启动不等待首轮网络**：首次配额拉取改为后台执行，激活与轮询定时器不再等待网络完成；v2 清理迁移仍先于 profiles 读取和轮询。
+- **凭证规范化与认证引导**：配额拉取在 Secret 读取后统一 trim，空白值进入 `noKey`；Kimi Code API Key 请求前同样 trim，空值或非 `sk-` 凭证在请求前给出引导，usages 401 返回不含响应详情的 Key 检查提示。
+- **未知服务类型数据保护**：公开保存/新增命令拒绝非法 kind，不再回退默认 GLM；保存已删除的 profile 会失败且不改写 Secret 或配置。Webview 对未知 kind 仅显示转义后的只读信息与删除入口，不渲染凭证或编辑表单。
+
+### 修复 (Fixed)
+
+- **2xx 非 JSON 响应误判**：`getJson`/`postJson` 对缺失 Content-Type 或 Content-Type 非 JSON 的 2xx 响应显式抛出安全错误，兼容 charset 与 `+json`；相关 message 不含响应正文，缺 Content-Type/非 JSON 错误也不携带 `responseBody`，避免登录页或网关错误被当作配额数据。
+- **过期数据污染历史与预警**：`isFreshServiceData()` 统一排除主错误、noKey 和 stale 数据，并应用于历史保存内部、调用方过滤和配额预警；stale 旧快照不会生成新历史点、更新 `updatedAt` 或触发新预警。
+- **GLM 详情永久加载与并发覆盖**：详情失败不再停留在无终态 loading，错误可重试且不清空其他范围；相同范围并发请求复用同一任务，延迟完成不会用旧快照覆盖并发刷新的配额或 stale 状态。
+- **掩码误写与配置误删**：掩码、缺失或非 string Key 在保存前统一映射为「不修改 Secret」，只有明确空串才删除；未渲染的 GLM endpoint 不再被缺省消息意外清空。
+- **降级不可诊断**：Kimi 会员等级不可用和 GLM 可选详情/订阅失败现在具有安全日志，Kimi 正常配额卡同时提供明确的等级不可用提示；这些改动不声明任何账号的线上字段或等级必定可用。
+- **刷新、删除与详情并发**：配额和详情网络完成后均基于最新快照合并；服务删除后的迟到详情无论成功、为空或失败都丢弃，不复活卡片、缓存或历史。刷新及首轮视图异常会收敛 `refreshingIds`，后台首轮异常具有显式兜底。
+- **损坏历史恢复**：损坏存储与非数组历史按空历史恢复，非法条目被过滤且保留合法旧点；保存前按当前 `activeIds` 排除已删除服务，避免迟到快照写回历史。
+- **Kimi 空值与有效窗口回退**：`null`、`undefined` 与空白计数不再被强制转换为 0；无效 5h 窗口会跳过并选择最短有效窗口，旧窗口不可用时继续回退有效 ratio 池。
+- **Webview 确认与状态清理**：确认面板展开时跳过轮询重渲染，避免销毁操作状态；按当前 profiles 清理已删除服务的前端卡片状态。
+- **状态栏 stale 提示**：`staleError` tooltip 明确当前显示上次成功数据，并展示经 Markdown 转义的刷新失败原因。
+
 ## [1.2.0] - 2026-09-22
 
 ### 浏览器扩展

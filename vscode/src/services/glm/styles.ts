@@ -1,290 +1,49 @@
-// GLM 仪表盘样式（按官方设计）
+// GLM 详情、等级与图表样式；卡片和配额共用 Dashboard 基座
 
 export const GLM_STYLES = `
-/* ===== GLM 卡片整体 ===== */
-.glm-card {
-	background: var(--vscode-editor-background);
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 8px;
-	overflow: hidden;
-	margin-bottom: 16px;
-}
-
-/* ===== 头部区域 ===== */
-.glm-header {
-	padding: 12px 14px;
-	border-bottom: 1px solid var(--vscode-panel-border);
-}
-
-.glm-header-row {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	gap: 8px;
-}
-
-.glm-header-row2 {
-	margin-top: 4px;
-}
-
-.glm-header-row3 {
-	margin-top: 4px;
-}
-
-.glm-renew-label {
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
-}
-
-.glm-renew-time {
-	font-size: 11px;
-	color: var(--vscode-foreground);
-	font-weight: 500;
-}
-
-.glm-header-left {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	flex-wrap: wrap;
-}
-
-.glm-user-name {
-	font-size: 14px;
-	font-weight: 600;
-	color: var(--vscode-foreground);
-}
-
-.glm-service-name {
-	font-size: 11px;
-	color: var(--vscode-descriptionForeground);
-}
-
-.glm-update-time {
-	font-size: 10px;
-	color: var(--vscode-descriptionForeground);
-	margin-left: auto;
-}
-
-.glm-refresh-btn {
-	padding: 2px 6px;
-	font-size: 12px;
-	margin-left: auto;
-	flex-shrink: 0;
-}
-
-/* 等级徽章 */
 .glm-level-badge {
-	background: linear-gradient(135deg, #FFD700, #FFA500);
-	color: #333;
-	font-size: 9px;
-	font-weight: 700;
-	padding: 1px 6px;
-	border-radius: 10px;
-	letter-spacing: 0.5px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
 }
-
-/* ===== 分区标题 ===== */
-.glm-section-title {
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--vscode-foreground);
-	margin-bottom: 10px;
-	padding: 0 14px;
-}
-
-/* ===== 用量统计区域 ===== */
-.glm-quota-section {
-	padding: 12px 0;
-	border-bottom: 1px solid var(--vscode-panel-border);
-}
-
-.glm-quota-cards {
-	padding: 0 14px;
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-
-.glm-quota-card {
-	background: var(--vscode-sideBar-background);
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 6px;
-	padding: 10px 12px;
-}
-
-.glm-quota-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 8px;
-}
-
-.glm-quota-label {
-	font-size: 12px;
-	color: var(--vscode-foreground);
-}
-
-.glm-quota-percent {
-	font-size: 16px;
-	font-weight: 700;
-	color: var(--vscode-foreground);
-}
-
-.glm-quota-used {
-	font-size: 11px;
-	font-weight: 400;
-	color: var(--vscode-descriptionForeground);
-	margin-left: 4px;
-}
-
-.glm-progress {
-	height: 4px;
-	margin-bottom: 6px;
-}
-
-.glm-quota-detail-line {
-	font-size: 10px;
-	color: var(--vscode-foreground);
-	margin-top: 4px;
-}
-
-.glm-quota-reset {
-	font-size: 10px;
-	color: var(--vscode-descriptionForeground);
-	margin-top: 2px;
-}
-
-/* ===== 使用详情区域 ===== */
-.glm-detail-section {
-	padding: 12px 0;
-}
-
-/* 主Tab */
-.glm-main-tabs {
-	display: flex;
-	gap: 2px;
-	margin-bottom: 8px;
-	padding: 0 14px;
-	border-bottom: 1px solid var(--vscode-panel-border);
-}
-
+.glm-detail-section { min-width: 0; padding: 10px 12px 12px; border-top: 1px solid var(--aqd-border); }
+.glm-main-tabs { display: flex; gap: 3px; border-bottom: 1px solid var(--aqd-border); }
 .glm-main-tab {
-	flex: 1;
-	padding: 5px 8px;
-	background: transparent;
-	border: none;
-	border-bottom: 2px solid transparent;
-	color: var(--vscode-descriptionForeground);
-	font-size: 11px;
-	font-family: inherit;
-	cursor: pointer;
-	transition: all 0.2s;
+	flex: 1; min-width: 0; min-height: 28px; padding: 4px 8px;
+	background: transparent; border: 0; border-bottom: 2px solid transparent;
+	color: var(--aqd-muted); font-family: inherit; font-size: 11px;
 }
-
-.glm-main-tab:hover {
-	color: var(--vscode-foreground);
-}
-
-.glm-main-tab.active {
-	color: var(--vscode-foreground);
-	border-bottom-color: #4A90D9;
-	font-weight: 500;
-}
-
-/* 子Tab */
-.glm-sub-tabs {
-	display: flex;
-	gap: 2px;
-	margin-bottom: 10px;
-	padding: 0 14px;
-}
-
+.glm-main-tab:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+.glm-main-tab.active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); font-weight: 600; }
+.glm-sub-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0; }
 .glm-sub-tab {
-	padding: 3px 10px;
-	background: transparent;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 3px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 10px;
-	font-family: inherit;
-	cursor: pointer;
-	transition: all 0.2s;
+	min-height: 24px; padding: 2px 9px; border: 1px solid var(--aqd-border); border-radius: 4px;
+	background: transparent; color: var(--aqd-muted); font-family: inherit; font-size: 10.5px;
 }
-
-.glm-sub-tab:hover {
-	color: var(--vscode-foreground);
-	border-color: var(--vscode-focusBorder);
+.glm-sub-tab:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
+.glm-sub-tab.active { background: var(--vscode-button-secondaryBackground); border-color: transparent; color: var(--vscode-button-secondaryForeground); }
+.glm-detail-content { min-width: 0; min-height: 76px; }
+.glm-loading, .glm-detail-empty { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 76px; padding: 16px 8px; color: var(--aqd-muted); font-size: 11px; text-align: center; }
+.glm-loading.glm-detail-status { min-height: 0; padding: 5px 0 10px; }
+.glm-loading .icon { color: var(--vscode-focusBorder); animation: spin 900ms linear infinite; }
+.glm-detail-error { display: flex; align-items: flex-start; gap: 7px; min-height: 76px; padding: 14px 8px; color: var(--aqd-muted); font-size: 11px; }
+.glm-detail-error.glm-detail-status { min-height: 0; padding: 5px 0 10px; }
+.glm-detail-error > .icon { width: 14px; height: 14px; margin-top: 2px; color: var(--aqd-danger); }
+.glm-detail-error-copy { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.glm-detail-error-copy strong { color: var(--vscode-foreground); font-weight: 600; }
+.glm-detail-error-copy p { margin-top: 3px; }
+.glm-detail-retry { flex: 0 0 auto; min-height: 24px; padding: 2px 7px; }
+.glm-detail-retry[aria-disabled="true"] { cursor: wait; opacity: .7; }
+.glm-summary-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr)); gap: 5px 14px; margin-top: 10px; }
+.glm-summary-item { display: flex; align-items: center; min-width: 0; gap: 6px; padding: 2px 0; font-size: 10.5px; }
+.glm-summary-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; }
+.glm-summary-name { min-width: 0; color: var(--aqd-muted); overflow-wrap: anywhere; }
+.glm-summary-value { margin-left: auto; color: var(--vscode-foreground); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.glm-chart-wrap { width: 100%; height: 104px; padding: 4px; overflow: hidden; border: 1px solid var(--aqd-border); border-radius: 4px; background: var(--vscode-sideBar-background); }
+.glm-chart { display: block; width: 100%; height: 100%; }
+@media (min-width: 600px) {
+	.glm-detail-section { padding-right: 14px; padding-left: 14px; }
 }
-
-.glm-sub-tab.active {
-	background: #4A90D9;
-	color: #fff;
-	border-color: #4A90D9;
-}
-
-/* 详情内容 */
-.glm-detail-content {
-	padding: 0 14px;
-}
-
-.glm-loading {
-	text-align: center;
-	padding: 20px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 12px;
-}
-
-/* ===== 汇总统计行 ===== */
-.glm-summary-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	margin-top: 12px;
-	margin-bottom: 12px;
-}
-
-.glm-summary-item {
-	display: flex;
-	align-items: center;
-	gap: 5px;
-	background: var(--vscode-sideBar-background);
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 4px;
-	padding: 5px 8px;
-	font-size: 11px;
-}
-
-.glm-summary-dot {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	flex-shrink: 0;
-}
-
-.glm-summary-name {
-	color: var(--vscode-descriptionForeground);
-}
-
-.glm-summary-value {
-	color: var(--vscode-foreground);
-	font-weight: 600;
-	margin-left: auto;
-}
-
-/* ===== 折线图 ===== */
-.glm-chart-wrap {
-	width: 100%;
-	height: 100px;
-	background: var(--vscode-sideBar-background);
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 4px;
-	padding: 4px;
-	overflow: hidden;
-}
-
-.glm-chart {
-	width: 100%;
-	height: 100%;
+@media (prefers-reduced-motion: reduce) {
+	.glm-loading .icon { animation: none; }
 }
 `;

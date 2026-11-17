@@ -9,7 +9,6 @@ src/**
 tsconfig.json
 eslint.config.mjs
 vitest.config.ts
-esbuild.browser.mjs
 esbuild.config.mjs
 
 # === Bundled Artifacts ===

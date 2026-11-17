@@ -3,17 +3,15 @@ import * as config from './core/config';
 import { StatusBar } from './ui/statusbar';
 import { registerAll } from './commands';
 import { loadHistory, saveHistory, attachHistory, clearAllData } from './storage/persistence';
-import { ServiceData, ServiceProfile, UsagePoint, SaveServicePayload, AddServicePayload, RemoveServicePayload, SaveGlobalPayload } from './core/types';
+import { runV2CleanupMigration } from './storage/migrations';
+import { API_KEY_MASK, isFreshServiceData, ServiceData, ServiceProfile, UsagePoint, SaveServicePayload, AddServicePayload, RemoveServicePayload, SaveGlobalPayload } from './core/types';
 import { DashboardWebviewViewProvider, SettingsData } from './dashboard/webviewView';
 import { CacheManager } from './core/cache';
 import { AfkDetector } from './core/afk';
 import { resolveProvider, isValidServiceId, getDescriptor, getAllDescriptors } from './services/registry';
-import { DataBridgeServer } from './bridge/server';
-import type { DataPayload } from './bridge/server';
-import { BRIDGE_AI_KINDS, collectBridgeSecretTargets, selectBridgeServicesToRemove } from './bridge/targets';
-import { processBridgePayload, mergeDetailRanges, BridgeRuntime, BridgeStateUpdates } from './bridge/payload-handler';
-import { BRIDGE_PORT_START } from '../../browser-common/protocol/index.js';
-import { setBridgeExtensionContext, updateBridgeState } from './services/bridge/state';
+import { mergeDetailRanges } from './services/glm/detailRanges';
+import { GlmDetailState, GlmServiceData, TimeRange } from './services/glm/types';
+import { SaveGlobalField, SaveGlobalResult } from './webview/types';
 
 let timer: NodeJS.Timeout | undefined;
 
@@ -21,7 +19,6 @@ const cache = new CacheManager();
 const serviceData = new Map<string, ServiceData>();
 let dashboardViewProvider!: DashboardWebviewViewProvider;
 const afkDetector = new AfkDetector();
-let bridge: DataBridgeServer | undefined;
 let isLoopRunning = false;
 
 // ===== 配额预警 =====
@@ -40,7 +37,7 @@ function checkQuotaWarnings(): void {
 
 	const warnings: string[] = [];
 	for (const [, data] of serviceData) {
-		if (data.err || data.slots.length === 0) { continue; }
+		if (!isFreshServiceData(data) || data.slots.length === 0) { continue; }
 		// 过滤非有限值的 percent，避免 NaN 污染 Math.max 导致预警失效
 		const validPercents = data.slots.map(s => s.percent).filter(p => Number.isFinite(p));
 		if (validPercents.length === 0) { continue; }
@@ -70,17 +67,12 @@ class AsyncQueue {
 }
 
 const refreshQueue = new AsyncQueue();
-const bridgeQueue = new AsyncQueue();
-
-/**
- * Data Bridge 推送的配额数据存储（kind → 最近推送的 serviceData）。
- * 非 TTL 缓存：数据活到下次推送；bridge 数据源的服务不再发起网络请求，
- * 仪表盘/状态栏数据均来自这里。
- */
-const bridgeDataStore = new Map<string, ServiceData>();
 
 // 正在刷新中的服务 ID 集合，随 updateData 推送给前端用于显示加载指示
 const refreshingIds = new Set<string>();
+
+// GLM 详情请求按 serviceId:range 去重，完成后无论成败均清理。
+const detailRequests = new Map<string, Promise<void>>();
 
 // OutputChannel 用于替代 console.log/error
 const outputChannel = vscode.window.createOutputChannel('AI Quota Dashboard');
@@ -110,7 +102,8 @@ async function getCurrentSettings(): Promise<SettingsData> {
 	const profiles = config.loadProfiles();
 	const keys: Record<string, string> = {};
 	for (const p of profiles) {
-		keys[p.id] = (await config.getKey(p.id)) ?? '';
+		// 设置页只接收掩码，明文 Key 永不进入 Webview 消息。
+		keys[p.id] = (await config.getKey(p.id)) ? API_KEY_MASK : '';
 	}
 	return {
 		profiles,
@@ -132,42 +125,36 @@ async function fetchSingleService(
 	historyMap: Map<string, UsagePoint[]>,
 	bar: StatusBar,
 ): Promise<boolean> {
-	const key = await config.getKey(profile.id);
-	// Data Bridge 数据源（dataSource='bridge'）的 AI 服务：数据由浏览器扩展推送，
-	// 有推送数据直接返回（不走网络请求、不要求 key）；无数据返回骨架让前端显示加载卡。
-	if (profile.dataSource === 'bridge' && BRIDGE_AI_KINDS.has(profile.kind)) {
-		const pushed = bridgeDataStore.get(profile.id);
-		const data: ServiceData = pushed
-			? { ...pushed, id: profile.id, name: profile.displayName }
-			: {
-				id: profile.id,
-				name: profile.displayName,
-				kind: profile.kind,
-				slots: [],
-				updatedAt: Date.now(),
-			};
-		bar.feed(data);
-		serviceData.set(profile.id, data);
-		cache.set(profile.id, data, 60);
+	const key = (await config.getKey(profile.id))?.trim() ?? '';
+	if (!key) {
+		const noKeyData: ServiceData = {
+			id: profile.id,
+			name: profile.displayName,
+			kind: profile.kind,
+			slots: [],
+			updatedAt: Date.now(),
+			noKey: true,
+		};
+		bar.feed(noKeyData);
+		serviceData.set(profile.id, noKeyData);
+		// noKey 是有效视图结果，但不缓存，确保配置 Key 后能立即拉取。
 		return true;
 	}
-	// Data Bridge 服务（kind='bridge'）的 fetch 仅读本地状态（不调用远程 API），不需要凭证，
-	// 允许 key 为空时继续，确保刚添加的 Bridge 服务能立即显示状态卡片。
-	if (!key && profile.kind !== 'bridge') { return false; }
 
 	try {
 		const provider = resolveProvider(profile.kind);
-		// 非 Bridge 服务此处 key 必非空（上方已校验）；Bridge 服务 fetch 不读取该参数
-		const data = await provider.fetch(key as string, profile.endpoint);
+		const data = await provider.fetch(key, profile.endpoint, { log });
 		data.id = profile.id;
 		data.name = profile.displayName;
+		delete data.noKey;
+		delete data.staleError;
 
 		// GLM 详情懒加载保护：全局刷新只会重新拉取 day 范围数据，
 		// 若直接覆盖 modelUsageByRange/toolUsageByRange，会丢失用户已懒加载的 week/month 详情。
-		// 此处把旧数据中已缓存的其它范围合并回新数据（day 由新数据覆盖）。
-		const oldData = serviceData.get(profile.id);
-		if (oldData) {
-			mergeDetailRanges(data, oldData);
+		// 此处把旧数据中已缓存的其它范围与加载状态合并回新数据（day 由新数据覆盖）。
+		const latestData = serviceData.get(profile.id);
+		if (latestData) {
+			mergeDetailRanges(data, latestData);
 		}
 
 		const withHistory = attachHistory(data, historyMap);
@@ -179,6 +166,16 @@ async function fetchSingleService(
 	} catch (err) {
 		logError(`[${profile.id}] 数据获取失败`, err);
 		const msg = err instanceof Error ? err.message : String(err);
+		const latestData = serviceData.get(profile.id);
+		if (latestData && latestData.err === undefined && latestData.noKey !== true) {
+			// stale-while-error：保留最新正常配额、详情、历史与原 updatedAt，仅附加可见刷新错误。
+			const staleData: ServiceData = { ...latestData, staleError: msg };
+			bar.feed(staleData);
+			serviceData.set(profile.id, staleData);
+			cache.set(profile.id, staleData, 300);
+			return true;
+		}
+
 		const errorData: ServiceData = {
 			id: profile.id,
 			name: profile.displayName,
@@ -197,95 +194,160 @@ async function fetchSingleService(
 // 拉取单个服务数据（外部命令调用）
 async function pullService(profileId: string, bar: StatusBar, ctx: vscode.ExtensionContext) {
 	return refreshQueue.enqueue(async () => {
-		const profiles = config.loadProfiles();
-		const profile = profiles.find(p => p.id === profileId);
-		if (!profile) { return; }
-
-		// 标记该服务正在刷新，让前端刷新按钮转起来（旧数据保留）
+		// 即使 profile 已缺失也先登记，确保 finally 能收敛前端乐观刷新状态。
 		refreshingIds.add(profileId);
-		await updateView();
+		try {
+			const profiles = config.loadProfiles();
+			const profile = profiles.find(p => p.id === profileId);
+			if (profile) {
+				await updateView();
+				const historyMap = loadHistory(ctx);
+				await fetchSingleService(profile, historyMap, bar);
+			}
 
-		const historyMap = loadHistory(ctx);
-		await fetchSingleService(profile, historyMap, bar);
-		bar.flush();
+			// 网络等待期间可能已删除服务，按最新配置清理旧快照与历史。
+			const latestProfiles = config.loadProfiles();
+			const activeIds = new Set(latestProfiles.map(p => p.id));
+			if (!activeIds.has(profileId)) {
+				serviceData.delete(profileId);
+				bar.remove(profileId);
+			}
+			for (const [id] of serviceData) {
+				if (!activeIds.has(id)) {
+					serviceData.delete(id);
+					bar.remove(id);
+				}
+			}
+			bar.flush();
 
-		// 刷新完成，清除标记
-		refreshingIds.delete(profileId);
-		await updateView();
-		// 与 doPullAll 口径对齐：过滤错误态数据 + 按 profiles 差集清理已删服务历史
-		const validData = new Map<string, ServiceData>();
-		for (const [id, data] of serviceData) {
-			if (!data.err) { validData.set(id, data); }
+			const validData = new Map<string, ServiceData>();
+			for (const [id, data] of serviceData) {
+				if (activeIds.has(id) && isFreshServiceData(data)) {
+					validData.set(id, data);
+				}
+			}
+			await saveHistory(ctx, validData, latestProfiles);
+		} finally {
+			refreshingIds.delete(profileId);
+			// 尽力推送收敛状态；若已有主异常，视图异常只记录日志，不能覆盖主异常。
+			try {
+				await updateView();
+			} catch (err) {
+				logError('刷新后更新视图失败', err);
+			}
 		}
-		await saveHistory(ctx, validData, profiles);
 	});
 }
 
 // 拉取所有服务数据（实际逻辑，不经过队列）
 async function doPullAll(bar: StatusBar, ctx: vscode.ExtensionContext): Promise<void> {
 	let hasResult = false;
+	let viewConverged = false;
 
 	// 加载历史数据（只需加载一次）
 	const historyMap = loadHistory(ctx);
 
 	const profiles = config.loadProfiles();
+	const roundRefreshingIds = new Set<string>();
 	// 对需要重新拉取（未命中缓存）的服务提前标记刷新态，让前端按钮转起来
 	for (const profile of profiles) {
 		if (!cache.get(profile.id)) {
 			refreshingIds.add(profile.id);
+			roundRefreshingIds.add(profile.id);
 		}
 	}
-	// 先推一次视图（旧数据 + 刷新标记），避免拉取期间界面无变化
-	await updateView();
 
-	for (const profile of profiles) {
-		// 先读缓存
-		const cached = cache.get(profile.id);
-		if (cached) {
-			const withHistory = attachHistory(cached, historyMap);
-			bar.feed(withHistory);
-			serviceData.set(profile.id, withHistory);
-			hasResult = true;
-			continue;
+	try {
+		// 先推一次视图（旧数据 + 刷新标记），避免拉取期间界面无变化
+		await updateView();
+
+		for (const profile of profiles) {
+			try {
+				// 首轮视图等待期间可能已删除服务，不能继续使用旧 profile 拉取或复用缓存。
+				if (!config.loadProfiles().some(p => p.id === profile.id)) {
+					serviceData.delete(profile.id);
+					bar.remove(profile.id);
+					continue;
+				}
+
+				// 先读缓存
+				const cached = cache.get(profile.id);
+				if (cached) {
+					const withHistory = attachHistory(cached, historyMap);
+					bar.feed(withHistory);
+					serviceData.set(profile.id, withHistory);
+					hasResult = true;
+					continue;
+				}
+
+				const ok = await fetchSingleService(profile, historyMap, bar);
+				// 网络等待期间可能已删除服务，必须按最新配置丢弃本次旧快照。
+				if (!config.loadProfiles().some(p => p.id === profile.id)) {
+					serviceData.delete(profile.id);
+					bar.remove(profile.id);
+					continue;
+				}
+				if (ok) { hasResult = true; }
+			} finally {
+				// 单个服务无论成功或异常都清除其刷新标记。
+				refreshingIds.delete(profile.id);
+			}
 		}
 
-		const ok = await fetchSingleService(profile, historyMap, bar);
-		if (ok) { hasResult = true; }
-		// 单个服务拉取完成，清除其刷新标记
-		refreshingIds.delete(profile.id);
-	}
-
-	// 按 profiles 差集清理内存残留：Bridge 同步删除等路径可能绕过手动删除命令，
-	// 若不及时清理，状态栏 bar.cache 会持续渲染已删服务的旧数据（幽灵项），
-	// saveHistory 也会持续为死服务写历史点。
-	const profileIds = new Set(profiles.map(p => p.id));
-	for (const id of Array.from(serviceData.keys())) {
-		if (!profileIds.has(id)) {
-			serviceData.delete(id);
-			bridgeDataStore.delete(id);
-			bar.remove(id);
+		// 按最新 profiles 差集清理内存与状态栏，避免网络等待期间删除的服务复活。
+		const latestProfiles = config.loadProfiles();
+		const activeIds = new Set(latestProfiles.map(p => p.id));
+		for (const id of Array.from(serviceData.keys())) {
+			if (!activeIds.has(id)) {
+				serviceData.delete(id);
+				bar.remove(id);
+			}
 		}
-	}
-	for (const id of Array.from(bridgeDataStore.keys())) {
-		if (!profileIds.has(id)) { bridgeDataStore.delete(id); }
-	}
+		for (const id of Array.from(refreshingIds)) {
+			if (!activeIds.has(id)) {
+				refreshingIds.delete(id);
+			}
+		}
 
-	// 统一渲染
+		// 统一渲染
 		if (hasResult) {
 			bar.flush();
 			await updateView();
-			// 过滤掉错误态的服务数据，避免错误结果污染 30 天历史曲线
-			const validData = new Map<string, ServiceData>();
-			for (const [id, data] of serviceData) {
-				if (!data.err) { validData.set(id, data); }
-			}
-			await saveHistory(ctx, validData, config.loadProfiles());
-			// 配额预警检查
-			checkQuotaWarnings();
 		} else {
 			bar.setEmpty();
 			await updateView();
 		}
+		viewConverged = true;
+
+		// 视图更新也会等待 Secret 读取；写历史前再次读取 profiles，收紧删除竞争窗口。
+		const historyProfiles = config.loadProfiles();
+		const historyActiveIds = new Set(historyProfiles.map(p => p.id));
+		// 过滤错误态及已删除服务，避免错误结果或旧快照污染 30 天历史曲线。
+		const validData = new Map<string, ServiceData>();
+		for (const [id, data] of serviceData) {
+			if (historyActiveIds.has(id) && isFreshServiceData(data)) {
+				validData.set(id, data);
+			}
+		}
+		// 即使本轮没有可用结果，也要用最新 activeIds 清理已删除服务的历史。
+		await saveHistory(ctx, validData, historyProfiles);
+		if (hasResult) {
+			checkQuotaWarnings();
+		}
+	} finally {
+		// 首轮 updateView 或任意服务异常时，本轮已添加的标记也不能泄漏到后续视图。
+		for (const id of roundRefreshingIds) {
+			refreshingIds.delete(id);
+		}
+		if (!viewConverged) {
+			// 尽力推送收敛状态；视图二次异常只记录日志，不能覆盖原始错误。
+			try {
+				await updateView();
+			} catch (err) {
+				logError('全量刷新异常后更新视图失败', err);
+			}
+		}
+	}
 }
 
 // 拉取所有服务数据（带队列保护，供外部调用）
@@ -306,20 +368,35 @@ async function afterConfigChange(bar: StatusBar, ctx: vscode.ExtensionContext, m
 		bar.clear();
 		cache.clear();
 		// 注意：不清空 serviceData —— 保留旧数据让前端卡片不闪烁。
-		// 标记所有当前服务为刷新中，前端会在按钮处显示转圈（旧数据保留）。
 		refreshingIds.clear();
-		for (const p of config.loadProfiles()) {
-			refreshingIds.add(p.id);
-		}
-		// 推一次视图（旧数据 + 刷新标记）
-		await updateView();
-		// 刷新数据（直接调用内部逻辑，避免嵌套队列死锁）
-		await doPullAll(bar, ctx);
-		// 服务列表变化后，按需启动/停止 Bridge 服务器
-		// （用户添加 Data Bridge 服务后启动，移除后停止）
-		await syncBridgeLifecycle(bar, ctx);
-		if (msg) {
-			vscode.window.showInformationMessage(msg);
+		const markedIds = new Set<string>();
+		let viewConverged = false;
+		try {
+			// 标记所有当前服务为刷新中，前端会在按钮处显示转圈（旧数据保留）。
+			for (const p of config.loadProfiles()) {
+				refreshingIds.add(p.id);
+				markedIds.add(p.id);
+			}
+			// 推一次视图（旧数据 + 刷新标记）
+			await updateView();
+			// 刷新数据（直接调用内部逻辑，避免嵌套队列死锁）
+			await doPullAll(bar, ctx);
+			viewConverged = true;
+			if (msg) {
+				vscode.window.showInformationMessage(msg);
+			}
+		} finally {
+			for (const id of markedIds) {
+				refreshingIds.delete(id);
+			}
+			if (!viewConverged) {
+				// 配置变更失败也要收敛前端刷新态，且不能用视图异常覆盖原始错误。
+				try {
+					await updateView();
+				} catch (err) {
+					logError('配置变更异常后更新视图失败', err);
+				}
+			}
 		}
 	});
 }
@@ -344,13 +421,9 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			// 人工触发本身就是活动证据：先刷新 AFK 计时，避免用户在 webview 面板内操作
 			// 不产生编辑器事件被误判「离开中」而拒绝刷新（定时轮询路径的 AFK 检查不受影响）
 			afkDetector.updateActivity();
-			if (afkDetector.checkAfk(config.afkThreshold())) {
-				vscode.window.showInformationMessage('用户离开中，跳过刷新');
-				return;
-			}
 			bar.setLoading();
 			cache.clear();
-			serviceData.clear();
+			// 保留旧 serviceData，失败时才能以 staleError 展示上一正常快照。
 			await pullAll(bar, ctx);
 		})
 	);
@@ -375,80 +448,129 @@ function registerDataCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const serviceId = typeof d.serviceId === 'string' ? d.serviceId : '';
 			// range 白名单校验，避免任意字符串污染 modelUsageByRange 状态对象
 			const VALID_DETAIL_RANGES = ['day', 'week', 'month'] as const;
-			const range = VALID_DETAIL_RANGES.includes(d.range as typeof VALID_DETAIL_RANGES[number])
-				? (d.range as typeof VALID_DETAIL_RANGES[number])
+			const range: TimeRange = VALID_DETAIL_RANGES.includes(d.range as TimeRange)
+				? (d.range as TimeRange)
 				: 'day';
 			if (!serviceId) { return; }
 
-			const profiles = config.loadProfiles();
-			const profile = profiles.find(p => p.id === serviceId);
-			if (!profile) { return; }
-
-			// Data Bridge 数据源的服务：数据由浏览器扩展推送（仅含当日详情），不支持范围懒加载
-			if (profile.dataSource === 'bridge') {
-				vscode.window.showInformationMessage('该服务数据由 Data Bridge 推送，仅提供当日详情');
+			const requestKey = `${serviceId}:${range}`;
+			const pending = detailRequests.get(requestKey);
+			if (pending) {
+				await pending;
 				return;
 			}
 
-			const key = await config.getKey(serviceId);
-			if (!key) { return; }
+			const task = (async () => {
+				const profiles = config.loadProfiles();
+				const profile = profiles.find(p => p.id === serviceId);
+				if (!profile) { return; }
 
-			let descriptor;
-			try {
-				descriptor = getDescriptor(profile.kind);
-			} catch (e) {
-				logError(`获取服务信息失败: ${profile.kind}`, e);
-				vscode.window.showErrorMessage(`获取 ${profile.displayName} 服务信息失败`);
-				return;
-			}
-			if (!descriptor.detailProvider || !descriptor.mergeDetailData) { return; }
+				const key = await config.getKey(serviceId);
+				if (!key) { return; }
 
-			try {
-				const detail = await descriptor.detailProvider.fetchDetail(range, key, profile.endpoint);
-				if (!detail) {
-					vscode.window.showWarningMessage(`未能获取 ${profile.displayName} 的详情数据，请稍后重试`);
+				let descriptor;
+				try {
+					descriptor = getDescriptor(profile.kind);
+				} catch (e) {
+					logError(`获取服务信息失败: ${profile.kind}`, e);
+					vscode.window.showErrorMessage(`获取 ${profile.displayName} 服务信息失败`);
 					return;
 				}
+				if (!descriptor.detailProvider || !descriptor.mergeDetailData) { return; }
 
-				const existing = serviceData.get(serviceId);
-				// existing 缺失（服务刚添加、首轮全局拉取未完成）时构造最小骨架再合并详情，
-				// 避免网络结果被静默丢弃导致前端 week/month 永远 loading；
-				// 骨架与 mergeDetailRanges 兼容，后续全局拉取会保留已缓存的范围数据
-				const target: ServiceData = existing ?? {
-					id: serviceId,
-					name: profile.displayName,
-					kind: profile.kind,
-					slots: [],
-					updatedAt: Date.now(),
+				const storeTarget = (target: GlmServiceData): boolean => {
+					// 网络等待期间服务可能已删除，任何状态都不得写回内存或缓存复活卡片。
+					if (!config.loadProfiles().some(p => p.id === serviceId)) {
+						serviceData.delete(serviceId);
+						return false;
+					}
+					serviceData.set(serviceId, target);
+					if (target.noKey !== true) {
+						const ttl = target.err !== undefined || target.staleError !== undefined ? 300 : 60;
+						cache.set(serviceId, target, ttl);
+					}
+					return true;
 				};
-				descriptor.mergeDetailData(target, detail, range);
-				serviceData.set(serviceId, target);
-				cache.set(serviceId, target, 60);
-				await updateView();
-			} catch (e) {
-				logError('详情数据获取失败', e);
-				vscode.window.showErrorMessage(`${profile.displayName} 详情数据获取失败: ${e instanceof Error ? e.message : String(e)}`);
+				const writeDetailState = (state: GlmDetailState): boolean => {
+					const latest = serviceData.get(serviceId);
+					const target: GlmServiceData = latest ? { ...latest } : {
+						id: serviceId,
+						name: profile.displayName,
+						kind: profile.kind,
+						slots: [],
+						updatedAt: Date.now(),
+					};
+					target.detailStates = { ...target.detailStates, [range]: state };
+					return storeTarget(target);
+				};
+
+				try {
+					if (!writeDetailState({ status: 'loading' })) { return; }
+					await updateView();
+					const detail = await descriptor.detailProvider.fetchDetail(range, key, profile.endpoint, { log });
+					const detailRecord = detail && typeof detail === 'object'
+						? detail as { modelUsage?: unknown; toolUsage?: unknown }
+						: undefined;
+					const hasModel = detailRecord?.modelUsage !== null && typeof detailRecord?.modelUsage === 'object';
+					const hasTool = detailRecord?.toolUsage !== null && typeof detailRecord?.toolUsage === 'object';
+					if (!detailRecord || (!hasModel && !hasTool)) {
+						const message = '详情响应为空或未包含模型/工具用量，请稍后重试';
+						logError(`[${serviceId}] ${range} 详情数据无效`, new Error(message));
+						if (!writeDetailState({ status: 'error', message })) { return; }
+						await updateView();
+						vscode.window.showWarningMessage(`未能获取 ${profile.displayName} 的详情数据，请稍后重试`);
+						return;
+					}
+
+					// 网络等待期间可能已有全局刷新写入新 slots/staleError，必须基于最新快照合并。
+					const latest = serviceData.get(serviceId);
+					if (!latest) { return; }
+					const target: GlmServiceData = { ...latest };
+					descriptor.mergeDetailData(target, detail, range);
+					target.detailStates = { ...target.detailStates, [range]: { status: 'ok' } };
+					if (!storeTarget(target)) { return; }
+					await updateView();
+				} catch (e) {
+					const message = e instanceof Error ? e.message : String(e);
+					logError('详情数据获取失败', e);
+					if (!writeDetailState({ status: 'error', message })) { return; }
+					await updateView();
+					vscode.window.showErrorMessage(`${profile.displayName} 详情数据获取失败: ${message}`);
+				}
+			})();
+
+			detailRequests.set(requestKey, task);
+			try {
+				await task;
+			} finally {
+				if (detailRequests.get(requestKey) === task) {
+					detailRequests.delete(requestKey);
+				}
 			}
 		})
 	);
 
 	// 重置所有数据
 	ctx.subscriptions.push(
-		vscode.commands.registerCommand('aiQuotaDashboard.resetData', async () => {
-			const confirmed = await vscode.window.showWarningMessage(
-				'确定要清除所有数据吗？此操作将删除所有服务配置、API 密钥和历史记录，且不可恢复。',
-				{ modal: true },
-				'确认清除',
-			);
-			if (confirmed === '确认清除') {
-				await clearAllData(ctx);
-				await config.initDefaults();
-				bar.clear();
-				cache.clear();
-				serviceData.clear();
-				await updateView();
-				vscode.window.showInformationMessage('所有数据已重置');
+		vscode.commands.registerCommand('aiQuotaDashboard.resetData', async (data?: unknown) => {
+			const isConfirmed = typeof data === 'object' && data !== null &&
+				(data as { confirmed?: unknown }).confirmed === true;
+			if (!isConfirmed) {
+				const confirmed = await vscode.window.showWarningMessage(
+					'确定要清除所有数据吗？此操作将删除所有服务配置、API 密钥和历史记录，且不可恢复。',
+					{ modal: true },
+					'确认清除',
+				);
+				if (confirmed !== '确认清除') { return; }
 			}
+
+			await clearAllData(ctx);
+			await config.initDefaults();
+			bar.clear();
+			cache.clear();
+			serviceData.clear();
+			await updateView();
+			vscode.window.showInformationMessage('所有数据已重置');
 		})
 	);
 }
@@ -461,20 +583,31 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 			const d = data as SaveServicePayload;
 			const id = typeof d.id === 'string' ? d.id : '';
 			const name = typeof d.name === 'string' ? d.name : '';
-			const defaultKind = getAllDescriptors()[0]?.kind ?? 'glm';
-			const kind = isValidServiceId(d.kind) ? d.kind : defaultKind;
-			const key = typeof d.key === 'string' ? d.key : '';
-			// 数据来源推导：Bridge 服务恒为 'bridge'；AI 服务有 key（用户在设置页手动输入）即 'manual'，
-			// 无 key 保持原 dataSource（bridge-fed 服务维持 Bridge 推送语义）
-			const dataSource = (kind === 'bridge'
-				? 'bridge'
-				: (key ? 'manual' : (d.dataSource === 'bridge' ? 'bridge' : 'manual'))) as 'manual' | 'bridge';
+			if (!isValidServiceId(d.kind)) {
+				vscode.window.showErrorMessage('不支持的服务类型，已拒绝保存');
+				return;
+			}
+			const kind = d.kind;
+			// 缺失/非 string/掩码都表示不动 Secret；只有明确空字符串才清除。
+			const key = typeof d.key === 'string' && d.key !== API_KEY_MASK ? d.key : undefined;
+			const endpoint = typeof d.endpoint === 'string' ? d.endpoint : undefined;
 			if (!id) { return; }
-			// 原子化保存：先在内存计算最终态（profile 字段 + secret 内容 + dataSource 标记），
-			// 再按「先写 Secret、后写 globalState」两次写入落盘，替代原先最多 5 次独立写入。
-			// 旧语义（kind 变化清旧 key、manual/bridge 数据来源切换清 key）已收敛进最终态计算，
-			// 取舍论证见 ConfigManager.saveServiceAtomic 注释。
-			await config.saveServiceAtomic(id, { displayName: name, kind, dataSource, key });
+			// 原子化保存：先在内存计算最终态（profile 字段 + secret 内容），
+			// 再按「先写 Secret、后写 globalState」两次写入落盘。
+			let saved: boolean;
+			try {
+				saved = await config.saveServiceAtomic(id, { displayName: name, kind, key, endpoint });
+			} catch (err) {
+				if (err instanceof config.ConfigValidationError) {
+					vscode.window.showErrorMessage(err.message);
+					return;
+				}
+				throw err;
+			}
+			if (!saved) {
+				vscode.window.showErrorMessage('服务不存在或已被删除，配置未保存');
+				return;
+			}
 			await afterConfigChange(bar, ctx, '服务配置已保存');
 		})
 	);
@@ -489,8 +622,11 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 				vscode.window.showErrorMessage('暂无可用的服务类型');
 				return;
 			}
-			const defaultKind = descriptors[0]?.kind ?? 'glm';
-			const kind = isValidServiceId(d.kind) ? d.kind : defaultKind;
+			if (!isValidServiceId(d.kind)) {
+				vscode.window.showErrorMessage('不支持的服务类型，无法添加服务');
+				return;
+			}
+			const kind = d.kind;
 			const name = getDescriptor(kind).defaultName;
 			await config.addService(kind, name);
 			await afterConfigChange(bar, ctx, `已添加 ${name} 服务`);
@@ -501,41 +637,28 @@ function registerServiceCommands(ctx: vscode.ExtensionContext, bar: StatusBar) {
 	ctx.subscriptions.push(
 		vscode.commands.registerCommand('aiQuotaDashboard.removeService', async (data: unknown) => {
 			if (!data || typeof data !== 'object') { return; }
-			const d = data as RemoveServicePayload;
+			const d = data as RemoveServicePayload & { confirmed?: unknown };
 			const id = typeof d.id === 'string' ? d.id : '';
 			if (!id) { return; }
-			const confirmed = await vscode.window.showWarningMessage(
-				'确定要移除此服务吗？',
-				{ modal: true },
-				'确认删除',
-			);
-			if (confirmed !== '确认删除') { return; }
-
-			const profiles = config.loadProfiles();
-			const target = profiles.find(p => p.id === id);
-			await removeServiceAndCleanup(id, bar, ctx);
-
-			// 级联删除：移除 Data Bridge 服务时，其派生的 bridge-fed AI 服务一并清理。
-			// 级联安全：这些服务纯派生（无用户凭证、数据来自浏览器推送），下次推送自动重建。
-			// 须在 Bridge 服务器停止（afterConfigChange → syncBridgeLifecycle）之前执行。
-			if (target?.kind === 'bridge') {
-				const fedIds = selectBridgeServicesToRemove(profiles, []).map(p => p.id);
-				for (const fedId of fedIds) {
-					await removeServiceAndCleanup(fedId, bar, ctx);
-					log(`[Bridge] 级联移除 bridge-fed 服务: ${fedId}`);
-				}
+			if (d.confirmed !== true) {
+				const confirmed = await vscode.window.showWarningMessage(
+					'确定要移除此服务吗？',
+					{ modal: true },
+					'确认删除',
+				);
+				if (confirmed !== '确认删除') { return; }
 			}
 
+			await removeServiceAndCleanup(id, bar, ctx);
 			await afterConfigChange(bar, ctx, '服务已移除');
 		})
 	);
 }
 
-/** 单条服务移除的完整清理（唯一删除路径：removeService 命令、级联、Bridge 同步删除共用） */
+/** 单条服务移除的完整清理。 */
 async function removeServiceAndCleanup(id: string, bar: StatusBar, ctx: vscode.ExtensionContext): Promise<void> {
 	await config.removeService(id);
 	serviceData.delete(id);
-	bridgeDataStore.delete(id);
 	// 状态栏同步摘除，避免 bar.cache 持续渲染已删服务的旧数据
 	bar.remove(id);
 	// 防御孤儿凭证：removeService 内部已清 Secret，此处幂等补刀
@@ -544,17 +667,29 @@ async function removeServiceAndCleanup(id: string, bar: StatusBar, ctx: vscode.E
 
 function registerSettingsCommands(ctx: vscode.ExtensionContext, bar: StatusBar, loop: () => Promise<void>) {
 	ctx.subscriptions.push(
-		vscode.commands.registerCommand('aiQuotaDashboard.saveGlobal', async (data: unknown) => {
-			if (!data || typeof data !== 'object') { return; }
+		vscode.commands.registerCommand('aiQuotaDashboard.saveGlobal', async (data: unknown): Promise<SaveGlobalResult> => {
+			if (!data || typeof data !== 'object') {
+				return { ok: false, message: '全局配置格式无效' };
+			}
 			const d = data as SaveGlobalPayload;
-			const refreshInterval = typeof d.refreshInterval === 'number' ? d.refreshInterval : 60;
-			const warnThreshold = typeof d.warnThreshold === 'number' ? d.warnThreshold : 0.8;
-			const afkThreshold = typeof d.afkThreshold === 'number' ? d.afkThreshold : 3600;
-			await config.setPollInterval(refreshInterval);
-			await config.setWarnThreshold(warnThreshold);
-			await config.setAfkThreshold(afkThreshold);
+			const fields: { field: SaveGlobalField; value: unknown; max: number; label: string }[] = [
+				{ field: 'refreshInterval', value: d.refreshInterval, max: 86400, label: '刷新间隔' },
+				{ field: 'warnThreshold', value: d.warnThreshold, max: 1, label: '预警阈值' },
+				{ field: 'afkThreshold', value: d.afkThreshold, max: 86400, label: 'AFK 阈值' },
+			];
+			// 三项全部通过后才允许写 Settings，避免静默填默认值或前两项已写、第三项才发现非法。
+			for (const { field, value, max, label } of fields) {
+				if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > max) {
+					return { ok: false, field, message: `${label}必须是 0 ~ ${max} 之间的有限数字` };
+				}
+			}
+
+			await config.setPollInterval(d.refreshInterval);
+			await config.setWarnThreshold(d.warnThreshold);
+			await config.setAfkThreshold(d.afkThreshold);
 			restartTimer(loop);
 			await afterConfigChange(bar, ctx, '全局配置已保存');
+			return { ok: true };
 		})
 	);
 }
@@ -592,136 +727,10 @@ function setupActivityListeners(ctx: vscode.ExtensionContext) {
 }
 
 // ====== 轮询启动 ======
-async function startPolling(loop: () => Promise<void>) {
-	await loop();
+function startPolling(loop: () => Promise<void>): void {
+	// 首轮后台执行并显式兜底，避免网络等待阻塞激活或产生未处理 rejection。
+	void loop().catch(err => logError('首轮数据刷新异常', err));
 	restartTimer(loop);
-}
-
-// ====== Data Bridge ======
-// 推送处理核心（状态更新 → 同步移除/去重 → 自动创建 → 分发 → 视图刷新）已提取至
-// bridge/payload-handler.ts（依赖注入、可测试）；此处仅保留队列接线与运行时组装。
-
-/** 组装 BridgeRuntime：把模块级状态与 vscode 副作用绑定为 processBridgePayload 的依赖 */
-function createBridgeRuntime(bar: StatusBar, ctx: vscode.ExtensionContext): BridgeRuntime {
-	return {
-		loadProfiles: () => config.loadProfiles(),
-		addService: (kind, displayName) => config.addService(kind, displayName),
-		updateServiceDataSource: (id, dataSource) => config.updateServiceDataSource(id, dataSource),
-		updateService: (id, updates) => config.updateService(id, updates),
-		updateServiceKey: (id, key) => config.updateServiceKey(id, key),
-		removeServiceAndCleanup: (id) => removeServiceAndCleanup(id, bar, ctx),
-		updateBridgeState: (updates: BridgeStateUpdates) => Promise.resolve(updateBridgeState(updates)),
-		fetchBridgeStatus: (endpoint) => resolveProvider('bridge').fetch('', endpoint),
-		getDescriptorDisplayName: (kind) => {
-			try {
-				return getDescriptor(kind)?.displayName ?? kind;
-			} catch {
-				return kind;
-			}
-		},
-		serviceData,
-		bridgeDataStore,
-		refreshingIds,
-		setCache: (id, data, ttlSec) => { cache.set(id, data, ttlSec); },
-		feedStatusBar: (data) => { bar.feed(data); },
-		removeStatusBar: (id) => { bar.remove(id); },
-		flushStatusBar: () => { bar.flush(); },
-		updateView,
-		deleteSecret: (key) => Promise.resolve(ctx.secrets.delete(key)),
-		log,
-		logError,
-	};
-}
-
-/**
- * 处理浏览器扩展推送的配额数据（DataBridgeServer 回调）。
- * 编排骨架在 bridge/payload-handler.ts，此处仅负责串行入队（bridgeQueue）与异常承接。
- */
-function handleDataPayload(payload: DataPayload, bar: StatusBar, ctx: vscode.ExtensionContext) {
-	bridgeQueue.enqueue(() => processBridgePayload(payload, createBridgeRuntime(bar, ctx))).catch((err: unknown) => {
-		// Y5：承接队列任务异常，消灭 unhandled rejection
-		logError('[Bridge] 处理数据推送失败', err);
-	});
-}
-
-/**
- * 若 Data Bridge 服务已添加但服务器未运行，则启动服务器。
- * 服务器仅在用户添加了 kind='bridge' 的服务后才会监听，符合"添加后才启用"语义。
- * 已运行则直接返回（幂等）。
- */
-async function ensureBridgeRunning(bar: StatusBar, ctx: vscode.ExtensionContext) {
-	if (bridge) { return; }
-
-	// 先用局部变量持有，启动成功后才赋值给模块级 bridge，
-	// 避免 start() 失败后 bridge 指向未监听的实例，导致后续 ensureBridgeRunning 永远命中 `if (bridge) return` 无法自愈
-	const candidate = new DataBridgeServer(
-		(payload: DataPayload) => handleDataPayload(payload, bar, ctx),
-		outputChannel,
-	);
-
-	try {
-		const port = await candidate.start(BRIDGE_PORT_START);
-		bridge = candidate;
-		ctx.subscriptions.push(bridge);
-		log(`Data Bridge 已启动，监听端口: ${port}`);
-	} catch (err) {
-		logError('Data Bridge 启动失败', err);
-		// 失败时清理候选实例（释放可能已占用的资源），不赋值给 bridge，下次可重试
-		await candidate.dispose().catch(() => { /* ignore */ });
-		await updateBridgeState({ connected: false, lastError: `启动失败: ${err instanceof Error ? err.message : String(err)}` });
-	}
-}
-
-/**
- * 若当前不存在 kind='bridge' 的服务，则停止 Bridge 服务器（若有）。
- * 用户移除 Data Bridge 服务后，服务器随之关闭，不再监听端口、不再接收推送。
- */
-async function stopBridgeIfIdle(ctx: vscode.ExtensionContext) {
-	const hasBridge = config.loadProfiles().some(p => p.kind === 'bridge');
-	if (hasBridge) { return; }
-	if (!bridge) { return; }
-
-	await bridge.dispose();
-	// 从 subscriptions 中移除已 dispose 的引用，避免 deactivate 时重复关闭
-	const idx = ctx.subscriptions.indexOf(bridge);
-	if (idx >= 0) { ctx.subscriptions.splice(idx, 1); }
-	bridge = undefined;
-	await updateBridgeState({ connected: false });
-	log('Data Bridge 已停止（用户未添加 Data Bridge 服务）');
-}
-
-/**
- * 根据当前服务列表同步 Bridge 服务器生命周期：有 bridge 服务则启动，无则停止。
- * 在 add/remove/save 命令后通过 afterConfigChange 调用。
- */
-async function syncBridgeLifecycle(bar: StatusBar, ctx: vscode.ExtensionContext) {
-	if (config.loadProfiles().some(p => p.kind === 'bridge')) {
-		await ensureBridgeRunning(bar, ctx);
-	} else {
-		await stopBridgeIfIdle(ctx);
-	}
-}
-
-/** Data Bridge 遗留凭证清理的持久标记（写入后不再重复执行） */
-const BRIDGE_SECRETS_CLEARED_KEY = 'aiQuotaDashboard.bridgeSecretsCleared';
-
-/**
- * 一次性迁移：Data Bridge 改造后，bridge 数据源的 AI 服务不再消费 Secret Storage
- * 中的任何凭证（数据改由浏览器扩展推送）。清理目标见 collectBridgeSecretTargets
- * （条件放宽：dataSource 缺失 || 'bridge'，覆盖 dataSource 字段出现之前的旧版
- * bridge-fed 服务；显式 'manual' 的用户手输凭证绝不可清理）。
- * 幂等：标记存在即跳过。
- *
- * 执行顺序注意：必须在 migrateBridgeDataSource 之前运行——后者会把缺失的
- * dataSource 落盘为 'manual'，导致本迁移永远匹配不到旧 profile（R2 回归点）。
- */
-async function migrateBridgeCredentials(ctx: vscode.ExtensionContext): Promise<void> {
-	if (ctx.globalState.get<boolean>(BRIDGE_SECRETS_CLEARED_KEY, false)) { return; }
-	const targets = collectBridgeSecretTargets(config.loadProfiles());
-	for (const id of targets) {
-		await ctx.secrets.delete(`apiKeys.${id}`);
-	}
-	await ctx.globalState.update(BRIDGE_SECRETS_CLEARED_KEY, true);
 }
 
 export async function activate(ctx: vscode.ExtensionContext) {
@@ -733,15 +742,10 @@ export async function activate(ctx: vscode.ExtensionContext) {
 		ctx.subscriptions.push(outputChannel);
 		ctx.subscriptions.push(afkDetector);
 
-		// Bridge 状态模块需要 ExtensionContext，无论是否启用 Bridge 都要注入
-		setBridgeExtensionContext(ctx);
-
-	config.setContext(ctx);
-	await config.initDefaults();
-	// 顺序不可对调（R2）：credentials 迁移须先于 dataSource 迁移执行，
-	// 否则缺失 dataSource 的旧 profile 会被落盘为 'manual' 而永远清不掉遗留凭证
-	await migrateBridgeCredentials(ctx);
-	await config.migrateBridgeDataSource();
+		config.setContext(ctx);
+		// 必须在任何 profiles 读取与轮询之前完成，避免旧 Bridge/MiMo 服务进入运行态。
+		await runV2CleanupMigration(ctx);
+		await config.initDefaults();
 
 		const bar = new StatusBar();
 		ctx.subscriptions.push(bar);
@@ -785,15 +789,12 @@ export async function activate(ctx: vscode.ExtensionContext) {
 			})
 		);
 
-		// Data Bridge：仅在用户已添加 Data Bridge 服务时启动
-		// 用户通过设置页添加/移除该服务后，afterConfigChange 会同步生命周期
-		await syncBridgeLifecycle(bar, ctx);
 
 		// 同步初始活动时间，避免启动时误判 AFK
 		afkDetector.updateActivity();
 
-		// 启动轮询
-		await startPolling(loop);
+		// 启动轮询：首轮后台拉取，定时器立即就绪。
+		startPolling(loop);
 	} catch (err) {
 		logError('扩展激活失败', err);
 		vscode.window.showErrorMessage(`AI Quota Dashboard 激活失败: ${err instanceof Error ? err.message : String(err)}`);
@@ -801,12 +802,11 @@ export async function activate(ctx: vscode.ExtensionContext) {
 	}
 }
 
-export async function deactivate(): Promise<void> {
+export function deactivate(): void {
 	if (timer) {
 		clearInterval(timer);
 		timer = undefined;
 	}
 	cache.dispose();
-	await bridge?.dispose();
 	// outputChannel 和 afkDetector 已纳入 ctx.subscriptions，由 VSCode 统一释放
 }

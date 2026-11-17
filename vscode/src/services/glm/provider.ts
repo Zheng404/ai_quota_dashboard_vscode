@@ -1,7 +1,8 @@
 import { URL } from 'url';
-import { QuotaProvider } from '../types';
+import { DetailProvider, ProviderLogger, QuotaProvider, safeErrorMessage } from '../types';
 import { QuotaSlot, UsagePoint } from '../../core/types';
 import { getJson } from '../../core/fetch';
+import type { HttpError } from '../../core/fetch';
 import { ServiceData } from '../../core/types';
 import { GlmServiceData, ModelUsageData, ToolUsageData, TimeRange } from './types';
 
@@ -187,7 +188,7 @@ export function sanitizeTimestamp(value: number | undefined | null): number | un
 	return value < 1e12 ? value * 1000 : value;
 }
 
-function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: QuotaSlot[]; level?: string } {
+export function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: QuotaSlot[]; level?: string } {
 	const limits = raw.limits ?? [];
 	const slots: QuotaSlot[] = [];
 
@@ -217,7 +218,7 @@ function parseLimits(raw: { limits?: RawLimit[]; level?: string }): { slots: Quo
  * 解析套餐订阅信息
  * 从 data 数组中找 inCurrentPeriod === true 的项，返回 nextRenewTime
  */
-function parseSubscription(raw: SubscriptionResponse): string | undefined {
+export function parseSubscription(raw: SubscriptionResponse): string | undefined {
 	if (raw.code !== 200 || !raw.success || !raw.data || raw.data.length === 0) {
 		return undefined;
 	}
@@ -230,7 +231,7 @@ function parseSubscription(raw: SubscriptionResponse): string | undefined {
 }
 
 /** 解析模型用量数据 */
-function parseModelUsage(raw: NonNullable<ModelUsageResponse['data']>): ModelUsageData {
+export function parseModelUsage(raw: NonNullable<ModelUsageResponse['data']>): ModelUsageData {
 	const xs = raw.x_time || [];
 	const tokens = raw.tokensUsage || [];
 	const calls = raw.modelCallCount || [];
@@ -306,17 +307,18 @@ export async function fetchGlmModelUsage(
 	base: string,
 	headers: Record<string, string>,
 	days: number,
+	logger?: ProviderLogger,
 ): Promise<ModelUsageData | undefined> {
 	try {
 		const qs = buildTimeRangeQuery(days);
 		const raw = await getJson<ModelUsageResponse>(
-			`${base}/api/monitor/usage/model-usage${qs}`, headers, 15000
+			`${base}/api/monitor/usage/model-usage${qs}`, headers, 15000, undefined, logger
 		);
 		if (raw.code === 200 && raw.success && raw.data) {
 			return parseModelUsage(raw.data);
 		}
 	} catch (err) {
-		console.warn(`[glm] fetch model usage failed: ${err}`);
+		logger?.log(`[glm] fetch model usage failed: ${safeErrorMessage(err)}`);
 	}
 	return undefined;
 }
@@ -326,34 +328,33 @@ export async function fetchGlmToolUsage(
 	base: string,
 	headers: Record<string, string>,
 	days: number,
+	logger?: ProviderLogger,
 ): Promise<ToolUsageData | undefined> {
 	try {
 		const qs = buildTimeRangeQuery(days);
 		const raw = await getJson<ToolUsageResponse>(
-			`${base}/api/monitor/usage/tool-usage${qs}`, headers, 15000
+			`${base}/api/monitor/usage/tool-usage${qs}`, headers, 15000, undefined, logger
 		);
 		if (raw.code === 200 && raw.success && raw.data) {
 			return parseToolUsage(raw.data);
 		}
 	} catch (err) {
-		console.warn(`[glm] fetch tool usage failed: ${err}`);
+		logger?.log(`[glm] fetch tool usage failed: ${safeErrorMessage(err)}`);
 	}
 	return undefined;
 }
 
 // ========== DetailProvider 实现 ==========
 
-import { DetailProvider } from '../types';
-
 export const glmDetailProvider: DetailProvider = {
-	async fetchDetail(range, apiKey, endpoint) {
+	async fetchDetail(range, apiKey, endpoint, logger) {
 		const days = range === 'day' ? 1 : range === 'week' ? 7 : 30;
 		const base = extractDomain(endpoint ?? GLM_DEFAULT_ENDPOINT);
 		const headers = { 'Authorization': `Bearer ${apiKey}` };
 
 		const [modelUsage, toolUsage] = await Promise.all([
-			fetchGlmModelUsage(base, headers, days),
-			fetchGlmToolUsage(base, headers, days),
+			fetchGlmModelUsage(base, headers, days, logger),
+			fetchGlmToolUsage(base, headers, days, logger),
 		]);
 
 		return { modelUsage, toolUsage };
@@ -376,14 +377,30 @@ export function mergeGlmDetailData(existing: ServiceData, detail: unknown, range
 
 export const glmProvider: QuotaProvider = {
 	kind: 'glm',
-	async fetch(apiKey, endpoint): Promise<GlmServiceData> {
+	async fetch(apiKey, endpoint, logger): Promise<GlmServiceData> {
 		const base = extractDomain(endpoint ?? GLM_DEFAULT_ENDPOINT);
-		const headers = { 'Authorization': `Bearer ${apiKey}` };
+		const normalizedApiKey = apiKey.trim();
+		const headers = { 'Authorization': `Bearer ${normalizedApiKey}` };
+		const quotaRequest = getJson<QuotaLimitResponse>(
+			`${base}/api/monitor/usage/quota/limit`, headers, 15000, undefined, logger,
+		).catch((err: unknown) => {
+			const statusCode = err instanceof Error ? (err as HttpError).statusCode : undefined;
+			if (statusCode === 401 || statusCode === 403) {
+				throw new Error('GLM 配额查询失败，请检查 API Key 是否有效');
+			}
+			throw err;
+		});
 
-		// 1. 用量统计（配额限额）+ 套餐订阅（并行）
-		const [quotaRaw, subRaw] = await Promise.all([
-			getJson<QuotaLimitResponse>(`${base}/api/monitor/usage/quota/limit`, headers, 15000),
-			getJson<SubscriptionResponse>(`${base}/api/biz/subscription/list`, headers, 15000).catch(() => undefined),
+		// 四个请求互不依赖，单批并行拉取；订阅与详情失败仍按各自逻辑降级
+		const [quotaRaw, subRaw, modelUsage, toolUsage] = await Promise.all([
+			quotaRequest,
+			getJson<SubscriptionResponse>(`${base}/api/biz/subscription/list`, headers, 15000, undefined, logger)
+				.catch((err: unknown) => {
+					logger?.log(`[glm] fetch subscription failed: ${safeErrorMessage(err)}`);
+					return undefined;
+				}),
+			fetchGlmModelUsage(base, headers, 1, logger),
+			fetchGlmToolUsage(base, headers, 1, logger),
 		]);
 
 		if (quotaRaw.code !== 200 || !quotaRaw.success) {
@@ -392,12 +409,6 @@ export const glmProvider: QuotaProvider = {
 
 		const { slots, level } = parseLimits(quotaRaw.data ?? { limits: [] });
 		const nextRenewTime = subRaw ? parseSubscription(subRaw) : undefined;
-
-		// 2. 模型用量 + 工具用量（并行拉取）
-		const [modelUsage, toolUsage] = await Promise.all([
-			fetchGlmModelUsage(base, headers, 1),
-			fetchGlmToolUsage(base, headers, 1),
-		]);
 
 		return {
 			id: 'glm',

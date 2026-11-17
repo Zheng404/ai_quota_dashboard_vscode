@@ -1,927 +1,336 @@
 # 开发者指南
 
-> 本文档面向希望为 AI Quota Dashboard 贡献代码或进行二次开发的开发者。内容涵盖 VSCode 扩展和浏览器扩展的完整开发流程。
-
----
-
-## 目录
-
-- [前置要求](#前置要求)
-- [项目结构概览](#项目结构概览)
-- [VSCode 扩展开发](#vscode-扩展开发)
-  - [环境搭建](#环境搭建)
-  - [编译与运行](#编译与运行)
-  - [调试（F5）](#调试f5)
-  - [架构设计：ServiceDescriptor 模式](#架构设计servicedescriptor-模式)
-  - [如何添加新的 AI 服务](#如何添加新的-ai-服务)
-- [浏览器扩展开发](#浏览器扩展开发)
-  - [本地测试加载](#本地测试加载)
-  - [调试 Service Worker](#调试-service-worker)
-  - [Chrome 与 Firefox 的差异](#chrome-与-firefox-的差异)
-- [测试](#测试)
-  - [运行单元测试](#运行单元测试)
-  - [测试结构](#测试结构)
-  - [Mock VSCode API](#mock-vscode-api)
-- [构建与打包](#构建与打包)
-  - [使用 build.sh](#使用-buildsh)
-  - [手动打包](#手动打包)
-  - [创建 VSIX](#创建-vsix)
-- [CI/CD 概览](#cicd-概览)
-- [代码风格与 Lint](#代码风格与-lint)
-- [常见问题排查](#常见问题排查)
-
----
+> AI Quota Dashboard 2.0.0 只包含 VSCode 扩展。本文覆盖 GLM/Kimi 手动 API Key 服务的开发、测试、Webview 构建、VSIX 打包和 CI。
 
 ## 前置要求
 
-| 工具 | 版本 | 说明 |
+| 工具 | 版本 | 用途 |
 |------|------|------|
-| **Node.js** | ≥ 18（推荐 20.x） | 运行 TypeScript 编译、测试和打包 |
-| **npm** | 随 Node.js 安装 | 包管理器 |
-| **VSCode** | ≥ 1.80 | 运行和调试 VSCode 扩展 |
-| **Chrome / Edge** | ≥ 116 | 测试浏览器扩展（Manifest V3） |
-| **Firefox** | ≥ 116 | 测试 Firefox 版本（Manifest V3） |
-| **vsce** | 全局安装 | 打包 VSIX：`npm install -g @vscode/vsce` |
-| **Git** | 任意 | 版本控制 |
+| Node.js | 推荐 20 | 编译、测试和构建；CI 固定使用 20 |
+| npm | 随 Node.js 安装 | 依赖与脚本 |
+| VSCode | 1.80+ | Extension Host 调试 |
+| `@vscode/vsce` | 可选全局安装 | 本地创建/发布 VSIX；CI 会自行安装 |
 
 ```bash
-# 验证环境
-node --version   # v20.x.x
-npm --version    # 10.x.x
-vsce --version   # 3.x.x
+node --version
+npm --version
 ```
 
----
+## 项目结构
 
-## 项目结构概览
-
-```
+```text
 ai_quota_dashboard_vscode/
-├── vscode/                     # VSCode 扩展
+├── .github/workflows/
+│   ├── ci.yml                  # VSCode 检查、测试和 VSIX Artifact
+│   └── release.yml             # 市场发布与仅 VSIX 的 GitHub Release
+├── .vscode/
+│   ├── extensions.json         # 推荐 ESLint 扩展
+│   ├── launch.json             # Run Extension（F5）
+│   ├── settings.json           # 工作区编辑器与写作辅助设置
+│   └── tasks.json              # 默认 npm watch；另有 compile task
+├── vscode/
 │   ├── src/
-│   │   ├── extension.ts        # 扩展入口
-│   │   ├── core/               # 核心模块（类型、缓存、格式化、AFK 检测等）
-│   │   ├── services/           # 服务层（ServiceDescriptor 注册表）
-│   │   │   ├── registry.ts     # 服务注册中心
-│   │   │   ├── types.ts        # QuotaProvider / ServiceDescriptor 接口
-│   │   │   ├── glm/            # GLM 服务完整包
-│   │   │   ├── kimi/           # Kimi 服务完整包
-│   │   │   ├── mimo/           # MiMo 服务完整包
-│   │   │   └── bridge/         # Data Bridge 状态服务（kind='bridge'，状态整合在「服务」标签页）
-│   │   ├── ui/                 # 状态栏、Webview 仪表盘
-│   │   ├── dashboard/          # Webview 模板与样式
-│   │   ├── storage/            # 历史数据持久化
-│   │   └── test/mocks/         # VSCode API Mock
-│   ├── package.json            # 扩展清单与脚本
-│   ├── tsconfig.json           # TypeScript 配置（strict 模式）
-│   └── eslint.config.mjs       # ESLint 配置
-├── browser-common/             # 浏览器扩展共享代码（Chrome/Firefox 共用）
-│   ├── cache.js / config.js    # 缓存与配置管理
-│   ├── shared-ui.js            # Popup/Dashboard 共享 UI 工厂（createSharedUI，页面差异经选项注入）
-│   ├── popup.html / popup.js   # Popup 仪表盘（页面专属逻辑，主体由 shared-ui.js 承载）
-│   ├── dashboard.html / dashboard.js # 独立 Dashboard 页面（同上）
-│   ├── templates.js            # 卡片模板
-│   ├── styles.css              # 样式表
-│   ├── api/                    # API 客户端（glm/kimi/mimo）
-│   ├── protocol/               # Data Bridge 协议共享层（双端单一可信源）
-│   └── scripts/
-│       ├── background.js       # Service Worker 瘦入口（init + 事件注册 + 编排）
-│       ├── lib/                # background 子模块（发布态经 esbuild 内联进 IIFE bundle）
-│       └── kimi-content.js     # Kimi content script（镜像 kimi.com localStorage 令牌）
-├── chrome/                     # Chrome/Edge 专属（仅 manifest + icons）
-│   ├── manifest.json           # Manifest V3
-│   └── icons/
-├── firefox/                    # Firefox 专属（仅 manifest + icons）
-│   ├── manifest.json           # Manifest V3 + browser_specific_settings.gecko
-│   └── icons/
-├── build.sh                    # 一键打包脚本（staging 组装 → esbuild → zip/VSIX，源码树零接触）
-└── .github/workflows/          # CI/CD 工作流
-    ├── ci.yml                  # 持续集成
-    └── release.yml             # 发版自动发布
+│   │   ├── extension.ts        # 激活、v2 清理、命令、轮询与预警
+│   │   ├── core/               # 类型、配置、HTTP、缓存、AFK、格式化
+│   │   ├── services/
+│   │   │   ├── registry.ts     # 仅 GLM/Kimi
+│   │   │   ├── glm/            # Provider、详情、状态栏、样式、设置与测试
+│   │   │   └── kimi/           # 新旧响应解析、状态栏、样式、设置与测试
+│   │   ├── storage/            # persistence 与 v2 migrations，含测试
+│   │   ├── ui/                 # 状态栏调度、渲染器与测试
+│   │   ├── dashboard/          # Webview 宿主与样式
+│   │   ├── webview/            # 前端 TS、GLM/Kimi 卡片
+│   │   ├── commands/           # 清除历史
+│   │   └── test/mocks/vscode.ts
+│   ├── resources/              # 图标
+│   ├── out/                    # extension.js，构建产物
+│   ├── media/                  # dashboard.js，构建产物
+│   ├── package.json            # 扩展清单与 scripts
+│   ├── esbuild.config.mjs      # 两个 bundle 的构建配置
+│   ├── tsconfig.base.json      # strict/noEmit 公共配置
+│   ├── tsconfig.json           # Extension 侧，排除 Webview
+│   ├── tsconfig.webview.json   # Webview 侧，包含 DOM
+│   ├── vitest.config.ts
+│   └── eslint.config.mjs
+└── README.md / CONTRIBUTING.md / AGENTS.md / SECURITY.md / DEVELOPMENT.md
 ```
 
----
-
-## VSCode 扩展开发
-
-### 环境搭建
+## 环境搭建
 
 ```bash
-# 1. 进入 VSCode 扩展目录
 cd vscode
-
-# 2. 安装依赖
-npm install
-
-# 3. 验证类型检查
+npm ci
 npm run compile
-
-# 4. 产出构建产物（F5 调试前必需）
 npm run build
 ```
 
-### 编译与运行
+`npm ci` 按 lockfile 安装；日常已有依赖的开发环境也可用 `npm install` 同步依赖变更。
 
-| 命令 | 作用 |
-|------|------|
-| `npm run compile` | `tsc` 纯类型检查（noEmit，不产出文件） |
-| `npm run build` | esbuild 打包：extension → `out/extension.js`（cjs）、webview → `media/dashboard.js`（iife） |
-| `npm run watch` | esbuild 监听模式（extension/webview 两个 bundle 同时监听，文件变更自动重建） |
-| `npm run clean` | 清理 `out/` 与 `media/` 构建产物 |
-| `npm run build:browser` | esbuild 打包浏览器扩展 background（IIFE → `build/staging/{chrome,firefox}/scripts/background.js`） |
-| `npm run lint` | 运行 ESLint 检查代码风格 |
-| `npm test` | 运行 vitest 单元测试（一次性） |
-| `npm run test:watch` | 监听模式运行测试 |
-| `npm run vscode:prepublish` | 发布前预检（`clean && compile && build`，vsce 打包时自动触发） |
+## npm scripts
+
+| 命令 | 实际行为 |
+|------|----------|
+| `npm run compile` | `tsc -p ./`，只检查 Extension 程序，`noEmit` 不产出 JS |
+| `npm run typecheck:webview` | `tsc -p ./tsconfig.webview.json`，独立检查 Webview DOM 侧类型 |
+| `npm run build` | esbuild 产出 `out/extension.js`（CJS）与 `media/dashboard.js`（IIFE） |
+| `npm run watch` | 通过 esbuild context 同时监听两个 bundle |
+| `npm run clean` | 删除 `out/` 和 `media/` |
+| `npm run lint` | `eslint src` |
+| `npm test` | `pretest` 先执行 `npm run compile`，再执行 `vitest run` |
+| `npm run test:watch` | `vitest` 监听模式 |
+| `npm run vscode:prepublish` | `clean && compile && typecheck:webview && build`，`vsce package/publish` 自动触发 |
+
+常用开发组合：
 
 ```bash
-cd vscode
-
-# 开发模式（终端 1：监听两个 bundle 重建）
+# 终端 1：持续构建 Extension 与 Webview
 npm run watch
 
-# 开发模式（终端 2：监听测试）
+# 终端 2：持续运行测试
 npm run test:watch
 ```
 
-### 调试（F5）
+不要手改 `out/extension.js` 或 `media/dashboard.js`。
 
-> **前置条件**：先在 `vscode/` 目录执行 `npm run build`（`out/extension.js` 与 `media/dashboard.js` 为 esbuild 产物，`npm run compile` 只做类型检查不产出文件）；日常开发可保持 `npm run watch` 自动重建。
+## F5 调试
 
-1. 在 VSCode 中打开**项目根目录**作为工作区
-2. 按 `F5` 或点击左侧「运行和调试」→「Run Extension」
-3. 这会启动一个新的 **Extension Development Host** 窗口
-4. 在新窗口中：
-   - 侧边栏会出现「AI 配额」图标
-   - 命令面板可使用所有 `aiQuotaDashboard.*` 命令
-5. 在原窗口的「调试控制台」可查看日志输出
+1. 用 VSCode 打开仓库根目录。
+2. 确保依赖已安装。首次调试可先执行 `npm run build`。
+3. 按 F5，选择「Run Extension」。`preLaunchTask` 会启动默认 `npm run watch` task。
+4. 在 Extension Development Host 中打开「AI 配额」，添加 GLM 或 Kimi 服务。
+5. 使用测试 Key 时自行遵守凭证安全要求；自动化测试和文档示例不需要也不应包含真实 Key。
 
-**断点调试**：在源码中设置断点，Extension Host 会暂停并允许单步调试。
+排错：
 
-```json
-// .vscode/launch.json（位于项目根目录）
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "name": "Run Extension",
-      "type": "extensionHost",
-      "request": "launch",
-      "args": ["--extensionDevelopmentPath=${workspaceFolder}/vscode"],
-      "outFiles": ["${workspaceFolder}/vscode/out/**/*.js"],
-      "preLaunchTask": "${defaultBuildTask}"
-    }
-  ]
-}
+- 扩展未加载：检查 `out/extension.js` 是否存在，以及 `npm run compile` 是否通过。
+- 仪表盘空白或卡片未更新：确认 `media/dashboard.js` 已重建，并打开 Webview 开发者工具查看 Console。
+- 未注册服务卡片：检查 `src/webview/main.ts` 是否显式调用对应 `registerXxxCard()`。
+- API 401/403：检查对应服务的 API Key；Kimi 只接受 `sk-` 前缀 Code API Key。
+- 状态栏显示不符合预期：检查 descriptor 的 `statusBarRenderer` 与服务实现。
+
+## 架构要点
+
+### ServiceDescriptor
+
+`src/services/registry.ts` 的默认注册表只有 `[glmDescriptor, kimiDescriptor]`。Descriptor 组织：
+
+- `provider`：配额 API 拉取与解析。
+- `settings`：服务设置表单元数据。
+- `styles`：服务 CSS，由仪表盘样式聚合器收集。
+- `statusBarRenderer`：可选状态栏定制。
+- `detailProvider` + `mergeDetailData`：可选详情懒加载，两者必须同时存在。
+- `helpCommand` + `helpMessage`：可选帮助按钮。
+
+卡片不属于 descriptor。`src/webview/cards/glm.ts` 和 `kimi.ts` 在 `src/webview/main.ts` 显式注册，由 `shared.ts` 按 `kind` 分发。
+
+### 激活与轮询
+
+`activate()` 在读取 profiles 或启动轮询前等待 `runV2CleanupMigration()`。随后注册命令、Webview、状态栏和活动监听，后台启动首次拉取并创建定时器；激活不等待首轮网络完成。
+
+`pullAll()` 先检查 AFK，再通过串行 `refreshQueue` 执行；`isLoopRunning` 防止轮询重入。每个服务从 Secret Storage 读取 Key 并 trim，缓存未命中时调用 Provider，并传入可选安全 logger。普通数据缓存 60 秒，主错误和 stale 数据缓存 300 秒；空白或缺失 Key 的 `noKey` 数据不缓存也不发请求。
+
+`refreshingIds` 随 `updateData` 发送给前端，使刷新期间保留旧卡片并显示按钮加载态。配置变更与手动刷新只清缓存、保留旧数据并重新拉取。若已有正常快照而刷新失败，`staleError` 保留旧 slots、详情、历史与原 `updatedAt`，前端显示过期提示和重试；没有旧快照时才生成 `err` 主错误卡。`isFreshServiceData()` 统一排除 `err`、`noKey` 和 `staleError`，历史保存与预警都不得把旧快照当新鲜样本，预警通知另有 30 分钟冷却。
+
+GLM 全局刷新通过 `src/services/glm/detailRanges.ts` 的 `mergeDetailRanges()` 保留已加载的 week/month 详情与 `detailStates`；`provider.ts` 中的 `mergeGlmDetailData()` 负责把一次懒加载结果写入指定范围，不要混淆两个函数。`requestDetailRange` 按 `serviceId:range` 去重，写入 `loading`/`ok`/`error` 状态；空详情、模型与工具用量同时缺失、请求异常都进入可重试错误终态。配额与详情网络完成后都必须基于最新 `serviceData` 快照合并，避免覆盖并发新配额、详情或 stale 状态；等待期间服务已删除时丢弃回写，late detail 不得复活卡片或缓存。
+
+### v2 清理迁移
+
+`src/storage/migrations.ts` 使用 `aiQuotaDashboard.v2CleanupDone`：
+
+- 清除旧 Data Bridge、MiMo、bridge-fed GLM/Kimi 的 profile 和对应 Secret。
+- 保留手动 GLM/Kimi（含无 `dataSource` 的旧手动数据），剥离遗留 `dataSource`。
+- 历史只保留现存 profile，顺便清理孤儿历史。
+- 清除旧 Bridge 状态与旧迁移标记，最后写完成标记。
+- 失败不写完成标记，下次激活重试；未知 kind 与来源不明的早期 GLM/Kimi 保守保留。
+
+修改此处必须同步更新 `migrations.test.ts`，覆盖 manual 保留、删除集合、幂等、失败重试与历史清理。
+
+## Webview 构建
+
+构建链：
+
+```text
+src/webview/main.ts
+  ├─ cards/glm.ts / cards/kimi.ts
+  ├─ shared.ts / settings.ts / types.ts
+  └─ esbuild IIFE（ES2020）
+       ↓
+media/dashboard.js
+       ↓ asWebviewUri + nonce
+Webview
 ```
 
-### 架构设计：ServiceDescriptor 模式
+宿主 `dashboard/webviewView.ts` 负责 HTML 骨架、样式、CSP、消息路由和设置元数据注入。业务代码全部由 bundle 外链加载；唯一内联脚本是 nonce 保护的 `window.__AQD_SETTINGS_META__` 数据注入。CSP 的 `script-src` 不允许 `unsafe-inline`。
 
-本项目采用**注册表模式**管理各 AI 服务。每个服务是一个独立的「包」，包含完整的数据流和渲染逻辑。
+Extension 与 Webview 是两个独立 TypeScript 程序：
 
-```typescript
-// src/services/types.ts
-interface ServiceDescriptor {
-  kind: ServiceId;                    // 服务标识，如 'glm' | 'kimi' | 'mimo' | 'bridge'
-  displayName: string;                // 显示名称
-  defaultName: string;                // 默认自定义名称
-  badgeLabel: string;                 // 徽章文字
-  badgeCssClass: string;              // 徽章 CSS 类
-  provider: QuotaProvider;            // 数据拉取逻辑
-  styles: string;                     // 专属 CSS
-  settings: ServiceSettingsDescriptor; // 设置表单元数据
-  statusBarRenderer?: StatusBarRenderer;   // 状态栏渲染器（可选）
-  detailProvider?: DetailProvider;         // 详情懒加载提供者（可选）
-  mergeDetailData?(existing, detail, range): void; // 合并详情数据
-  helpCommand?: string;               // 帮助命令标识
-  helpMessage?: string;               // 帮助提示内容
-}
-```
+- `tsconfig.json`：Node/VSCode 类型，无 DOM lib，排除 `src/webview/**`。
+- `tsconfig.webview.json`：DOM lib，包含 `src/webview/**/*`。
 
-> 注：卡片渲染不再属于 ServiceDescriptor（早期 `templateScript` 字段已随构建链移除）——仪表盘卡片为 `src/webview/cards/{kind}.ts` TS 模块，构建期编译进 `media/dashboard.js`，在 `src/webview/main.ts` 显式注册。
-
-**数据流**：
-
-> 以下路径相对于 `vscode/src/`。
-
-```
-pullAll() 定时触发
-    ├─ AFK 检测（超阈值则跳过）
-    ├─ AsyncQueue 串行执行（消除并发竞态）
-    ├─ 遍历 ServiceProfile
-    │   ├─ 命中 LRU 内存缓存 → 直接使用旧数据
-    │   └─ 未命中 → refreshingIds.add(id) → resolveProvider(kind).fetch()
-    │        └─ fetch 完成后 refreshingIds.delete(id)
-    ├─ updateView() 先推一次（旧数据 + refreshingIds）→ 前端按钮转圈、卡片不中断
-    ├─ StatusBar.feed() → flush()
-    ├─ DashboardWebviewViewProvider.update() → postMessage（含 refreshingIds）
-    ├─ saveHistory() → globalState 持久化
-    └─ checkQuotaWarnings() → 超阈值弹出 VSCode 警告通知（30 分钟冷却）
-```
-
-> **无缝刷新**：`refreshingIds: Set<string>` 标记正在刷新的服务，随 `updateData` 推送给前端。刷新时保留旧数据，对应服务卡片刷新按钮旋转（`.spinning svg`）；首次加载/新增服务时显示轻量加载骨架卡（`renderLoadingCard`）。仪表盘采用三个平级 tab：仪表盘 / 服务 / 设置。
-
-> **Bridge 按需启停**：Bridge 服务器**仅在用户添加了 Data Bridge 服务后启动**（`syncBridgeLifecycle` → `ensureBridgeRunning`），移除后自动关闭（`stopBridgeIfIdle`）。浏览器扩展推送配额数据后，VSCode 的 `handleDataPayload()`（`extension.ts`）会**自动创建/更新**对应的 AI 服务（标记 `dataSource='bridge'`，无需凭证）：推送的 `serviceData` 写入 `bridgeDataStore`（模块级 Map，活到下次推送），bridge 数据源的 AI 服务**不再发网络请求、不需要也不存储 Secret 凭证**。Secret Storage 中历史遗留的 bridge 凭证由一次性迁移 `migrateBridgeCredentials()` 清理（标记 `aiQuotaDashboard.bridgeSecretsCleared`，须先于 `migrateBridgeDataSource()` 执行——后者会把缺失 `dataSource` 的旧 profile 落盘为 `manual`，顺序颠倒会导致清理条件失效）。分发查找只接管 `dataSource='bridge'` 的服务：已存在同 kind 的 manual 服务时另行新建 bridge-fed 服务并存，绝不修改 manual profile、绝不删除其 Secret（见 `bridge/targets.ts` 纯函数 `resolveBridgeTargets`）。bridge-fed 服务**不在服务标签页单独展示**（状态整合在 Data Bridge 条目内）；移除 Data Bridge 服务时级联移除全部 bridge-fed 服务（纯派生可自动重建），改为手动输入的路径是「移除 Data Bridge 服务 → 手动添加同 kind 服务」。Bridge 状态（连接徽章、最后同步、已接收数据种类标签）整合在「服务」标签页的 Bridge 服务条目内，不在仪表盘单独显示卡片。
-
-**注册服务**：在 `src/services/registry.ts` 中导入并注册：
-
-```typescript
-import { myServiceDescriptor } from './myservice';
-
-const _defaultRegistry = createRegistry([
-  glmDescriptor,
-  kimiDescriptor,
-  mimoDescriptor,
-  bridgeDescriptor,
-  myServiceDescriptor,  // ← 新服务加在这里
-]);
-```
-
-### 如何添加新的 AI 服务
-
-假设要添加一个名为 `nova` 的新服务，步骤如下：
-
-#### 第 1 步：创建服务目录
+因此 `npm run compile` 并不替代 Webview 独立类型检查；修改前端后建议同时运行：
 
 ```bash
-cd vscode/src/services
-mkdir nova
-touch nova/index.ts nova/provider.ts nova/types.ts nova/template.ts \
-      nova/styles.ts nova/settings.ts nova/statusBar.ts
+npm run compile
+npm run typecheck:webview
+npm run build
 ```
 
-#### 第 2 步：实现数据提供者
+设置面板采用数据指纹、编辑焦点与确认面板守卫，避免轮询重渲染冲掉输入或确认状态；已删除服务的前端卡片状态按当前 profiles 清理。未知 kind 只显示转义后的只读配置与删除入口，不渲染凭证或编辑表单。新增动态文本必须继续经过 HTML/Markdown 转义。
 
-```typescript
-// nova/provider.ts
-import { QuotaProvider } from '../types';
-import { ServiceData, QuotaSlot } from '../../core/types';
-import { httpRequest } from '../../core/fetch';
+Key 设置不再把明文发送到 Webview：`settings.keys[id]` 只有 `API_KEY_MASK` 或空串。保存消息中 `key` 的 `undefined`（含 mask、缺失或非 string）表示保留 Secret，空串表示删除，新字符串表示替换；`endpoint` 同样遵循 `undefined` 保留、空串删除、新值更新。前端只在 endpoint 控件实际渲染时提交该字段，因此 GLM 当前未开放编辑时不会误删旧 endpoint。掩码只是 UI 标记，不是加密值，绝不能写入 Secret Storage。公开保存/新增命令拒绝非法 kind；保存目标 profile 已删除时返回失败，不写 Secret 或配置，也不触发刷新。
 
-export const novaProvider: QuotaProvider = {
-  kind: 'nova',
-  async fetch(apiKey: string, endpoint?: string): Promise<ServiceData> {
-    const url = endpoint || 'https://api.nova.example/v1/quota';
-    const res = await httpRequest(url, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    const json = JSON.parse(res);
+全局设置由 `webview/compute.ts` 做空值、有限数字、范围和步长预检，Extension 再做三项全量范围校验，全部通过后才写 Settings。宿主将命令结果以 `saveGlobalResult` 回发，设置页按 `field` 显示字段错误、焦点和保存状态，不能静默填默认值或发生部分校验失败后才开始写入。
 
-    const slots: QuotaSlot[] = [{
-      label: '每日额度',
-      percent: json.data.used / json.data.limit * 100,
-      used: json.data.used,
-      limit: json.data.limit,
-      resetsAt: json.data.resetTime,
-    }];
+GLM 详情面板使用复合 ARIA：`aria-labelledby` 同时指向当前模型/工具主 tab 与时间范围子 tab，并同步 `aria-selected`、roving tabindex、`aria-busy`；详情错误必须提供重试入口。
 
-    return {
-      id: 'placeholder',  // 由上层填充
-      name: 'Nova',
-      kind: 'nova',
-      slots,
-      updatedAt: Date.now(),
-    };
-  }
-};
-```
+## 配置与隐私边界
 
-#### 第 3 步：定义扩展类型（可选）
+| 数据 | 位置 |
+|------|------|
+| profiles | `globalState.services` |
+| API Key | Secret Storage `apiKeys.{serviceId}` |
+| 历史 | `globalState` 的 `aiQuotaDashboard.history`，最多 30 天 |
+| 刷新/预警/AFK | VSCode Settings 的 `aiQuotaDashboard.*` |
+| Settings 迁移标记 | `aiQuotaDashboard.configMigrated` |
+| v2 清理标记 | `aiQuotaDashboard.v2CleanupDone` |
 
-```typescript
-// nova/types.ts
-import { ServiceData } from '../../core/types';
+全局三项设置只写 Settings；旧 `globalState` 值通过一次性迁移搬入 Settings。`clearAllData()` 清除 profiles 对应 Secret 与全部 `globalState`，不会清除 VSCode Settings。历史读取与持久化合并会清洗损坏条目，保存前按当前 profiles 的 `activeIds` 排除已删除服务。
 
-export interface NovaServiceData extends ServiceData {
-  tier?: string;        // 套餐等级
-  region?: string;      // 服务区域
-}
-```
+网络请求只发往 GLM/Kimi API 以查询配额。Kimi 的 endpoint 可在服务设置中选择 `https://api.kimi.com` 或 `https://api.kimi.ai`，Provider 只接受这两个官方 HTTPS origin，`/coding/v1/usages` 与 `/coding/v1/me` 共用归一化结果；非法或非官方值回退 CN 默认站。GLM 仍支持既有 endpoint 覆盖，修改保存逻辑时不得因未渲染输入框而清除它。
 
-#### 第 4 步：编写 Webview 卡片渲染模块
+`getJson`/`postJson` 对 2xx 非 JSON Content-Type 和缺失 Content-Type 抛出不含响应正文的安全错误，兼容 charset 与 `+json`。Provider 的 fetch/detail logger 为可选参数；GLM 订阅、模型、工具以及 Kimi 会员等级降级只记录安全 message，不记录 Key、请求头、`responseBody` 或个人资料。Kimi `/me` 失败不阻断 `/usages`，正常卡显示会员等级不可用提示。
 
-```typescript
-// src/webview/cards/nova.ts
-import { registerCard } from '../shared';
-import type { WebviewServiceData } from '../types';
-// 共享渲染工具（escapeHtml / fmtNum / SVG 图表等）经模块 import，类型安全
-import { escapeHtml, fmtNum } from '../shared';
-
-export function registerNovaCard() {
-  registerCard('nova', (data: WebviewServiceData) => {
-    const slots = data.slots || [];
-    let html = '<div class="nova-card">';
-    html += '<h3>' + escapeHtml(data.name) + '</h3>';
-    slots.forEach((slot) => {
-      html += '<div class="quota-row">';
-      html += '<span>' + escapeHtml(slot.label) + '</span>';
-      html += '<div class="progress-bar">';
-      html += '<div class="progress-fill" style="width:' + slot.percent + '%"></div>';
-      html += '</div>';
-      html += '<span>' + Math.round(slot.percent) + '%</span>';
-      html += '</div>';
-    });
-    html += '</div>';
-    return html;
-  });
-}
-```
-
-随后在 `src/webview/main.ts` 顶部显式注册：
-
-```typescript
-import { registerNovaCard } from './cards/nova';
-registerNovaCard();
-```
-
-> 卡片经 esbuild 构建期编译进 `media/dashboard.js`（IIFE bundle），由 `shared.ts` 的 `renderService(data)` 按 `data.kind` 从内置注册表分发；未注册 kind 显式报错。无 inline script、无字符串模板注入。
-
-#### 第 5 步：编写专属样式
-
-```typescript
-// nova/styles.ts
-export const NOVA_STYLES = `
-  .nova-card {
-    padding: 16px;
-    border-radius: 8px;
-    background: var(--vscode-editor-background);
-  }
-  .nova-card h3 {
-    margin: 0 0 12px 0;
-    color: var(--vscode-foreground);
-  }
-  .quota-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-  .progress-bar {
-    flex: 1;
-    height: 8px;
-    background: var(--vscode-scrollbarSlider-background);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%;
-    background: var(--vscode-progressBar-background);
-    transition: width 0.3s ease;
-  }
-`;
-```
-
-#### 第 6 步：编写设置元数据
-
-```typescript
-// nova/settings.ts
-import { ServiceSettingsDescriptor } from '../types';
-
-export const NOVA_SETTINGS: ServiceSettingsDescriptor = {
-  keyPlaceholder: 'API Key',
-  keyHint: '在 Nova 控制台获取 API Key',
-  showHelpButton: true,
-};
-```
-
-AI 服务默认 `dataSource='manual'`（手动输入）。服务标签页根据 `dataSource` 渲染三种形态：
-- `manual`：显示输入框 + 提示
-- `bridge`（由 Data Bridge 推送得到）：不在服务列表单独展示（状态整合在 Data Bridge 条目内）；移除 Data Bridge 服务时级联移除（纯派生，浏览器下次推送自动重建）
-- `kind='bridge'` 服务本身：显示 Bridge 连接状态徽章
-
-若希望新服务支持 Data Bridge 推送，还需在浏览器扩展 `relay.js` 的 `gatherAllQuotaData()` 中复用 `api/` fetcher、用自身凭证采集该服务配额数据；VSCode 端 `extension.ts` 的 `handleDataPayload` 接收逻辑按 `kind` 匹配（内置 `glm`/`kimi`/`mimo`）。
-
-#### 第 7 步：实现状态栏渲染器（可选）
-
-```typescript
-// nova/statusBar.ts
-import { StatusBarRenderer, StatusBarSegment, TooltipMeta, TooltipQuotaLine } from '../../ui/statusBarRenderer';
-import { NovaServiceData } from './types';
-
-export const novaStatusBarRenderer: StatusBarRenderer<NovaServiceData> = {
-  filterSlots(data) {
-    return data.slots.map(s => ({
-      text: `${Math.round(s.percent)}%`,
-      percent: s.percent,
-      resetsAt: s.resetsAt,
-    }));
-  },
-  buildTooltipMeta(data) {
-    return { title: data.name, subtitle: data.tier || '' };
-  },
-  buildTooltipQuotas(data) {
-    return data.slots.map(s => ({
-      label: s.label,
-      percent: s.percent,
-      detail: s.limit ? `${s.used}/${s.limit}` : undefined,
-    }));
-  }
-};
-```
-
-#### 第 8 步：组装 ServiceDescriptor
-
-```typescript
-// nova/index.ts
-import { ServiceDescriptor } from '../types';
-import { novaProvider } from './provider';
-import { NOVA_STYLES } from './styles';
-import { NOVA_SETTINGS } from './settings';
-import { novaStatusBarRenderer } from './statusBar';
-
-export const novaDescriptor: ServiceDescriptor = {
-  kind: 'nova',
-  displayName: 'Nova AI Platform',
-  defaultName: 'Nova',
-  badgeLabel: 'NOVA',
-  badgeCssClass: 'badge-nova',
-  provider: novaProvider,
-  styles: NOVA_STYLES,
-  settings: NOVA_SETTINGS,
-  statusBarRenderer: novaStatusBarRenderer,
-  helpCommand: 'showNovaHelp',
-  helpMessage: '请访问 https://nova.example.com/settings/api 获取 API Key',
-};
-```
-
-#### 第 9 步：注册到全局注册表
-
-```typescript
-// src/services/registry.ts
-import { novaDescriptor } from './nova';
-
-const _defaultRegistry = createRegistry([
-  glmDescriptor,
-  kimiDescriptor,
-  mimoDescriptor,
-  bridgeDescriptor,
-  novaDescriptor,  // ← 添加
-]);
-```
-
-#### 第 10 步：添加样式到仪表盘
-
-样式通过注册表**自动聚合**（`styles.ts` 遍历 `getAllDescriptors()` 收集每个服务的 `desc.styles`），无需手动编辑聚合代码。只需在 `nova/styles.ts` 导出 `NOVA_STYLES` 并在 `nova/index.ts` 的 descriptor 中设置 `styles: NOVA_STYLES` 即可：
-
-**注意事项**：
-- `ServiceProfile` 的 `dataSource` 字段决定数据来源：`'manual'`（用户手动输入凭证）或 `'bridge'`（浏览器扩展推送配额数据）
-- 新增 AI 服务时默认 `dataSource='manual'`；浏览器扩展推送该 kind 的配额数据后，`handleDataPayload` 会自动创建/更新对应服务并标记 `'bridge'`
-- Bridge 服务（`kind='bridge'`）固定 `dataSource='bridge'`，仅用于展示浏览器扩展连接状态
-- 同一 kind 的 bridge 来源服务由推送自动创建/更新；已知行为：bridge-fed 服务被移除后，若浏览器仍推送该 kind 会自动重建
-
-### 配置存储与 Bridge 状态持久化
-
-VSCode 扩展的配置与状态持久化位置如下：
-
-| 数据 | 存储位置 | Key | 说明 |
-|------|---------|-----|------|
-| 服务列表 | `globalState` | `services` | `ServiceProfile[]`，含 `dataSource` 字段（`manual` 或 `bridge`） |
-| API Keys / Cookie | `Secret Storage` | `apiKeys.{serviceId}` | 每个 profile 独立存储，仅 `manual` 来源服务使用；bridge 数据源服务不存储凭证 |
-| 刷新间隔 | `globalState` + Settings | `refreshInterval` / `aiQuotaDashboard.refreshInterval` | 默认 600 秒，同步写入 Settings |
-| 预警阈值 | `globalState` + Settings | `warnThreshold` / `aiQuotaDashboard.warnThreshold` | 默认 0.8，超阈值触发警告通知（30 分钟冷却） |
-| AFK 阈值 | `globalState` + Settings | `afkThreshold` / `aiQuotaDashboard.afkThreshold` | 默认 3600 秒，同步写入 Settings |
-| 历史数据 | `globalState` | `aiQuotaDashboard.history` | 30 天保留，UTC 按日期去重 |
-| **Bridge 连接状态** | `globalState` | `aiQuotaDashboard.bridgeState` | 由 `bridge/state.ts` 维护（内存 + globalState 双层） |
-| **迁移标记** | `globalState` | `aiQuotaDashboard.bridgeSecretsCleared` | bridge 凭证一次性迁移清理（Secret Storage 历史遗留凭证）完成后写入 |
-
-**Bridge 状态说明**：
-
-- `aiQuotaDashboard.bridgeState` 保存 Bridge 的运行状态：`connected`、`lastPushAt`、`receivedKinds`（已接收配额数据的服务种类数组）、`lastError`。
-- 浏览器扩展推送配额数据后，`handleDataPayload` 先更新该状态摘要，再**自动创建/更新**对应的 AI 服务（标记 `dataSource='bridge'`）：推送的 `serviceData` 写入 `bridgeDataStore`（模块级 Map，活到下次推送），最后**热重载**刷新（保留旧数据 + 标记 refreshingIds + `updateView()`）。
-- Bridge 状态（连接徽章、最后同步、已接收数据种类标签、诊断）整合在「服务」标签页的 Bridge 服务条目内（`settings.ts` 的 `renderServiceItem`），不在仪表盘单独显示卡片。`bridge/provider.ts` 读取 `bridgeState` 生成数据，不拉取远程 API。
-- bridge 数据源的 AI 服务不再发网络请求、不需要也不存储 Secret 凭证；历史遗留 bridge 凭证由一次性迁移 `migrateBridgeCredentials()` 清理。
-- Bridge 服务器**按需启停**：`syncBridgeLifecycle` 检查是否存在 `kind='bridge'` profile，有则 `ensureBridgeRunning` 启动监听，无则 `stopBridgeIfIdle` 关闭。
-
----
-
-## 浏览器扩展开发
-
-浏览器扩展（Data Bridge）为**纯 JavaScript**：开发态共享代码为 ESM 直载（manifest `type: module`，无需构建），发布态 background 经 esbuild 打包为 IIFE 单文件（见「构建与打包」）。
-
-### 本地测试加载
-
-> **说明**：`chrome/` 和 `firefox/` 目录仅含 `manifest.json` 和 `icons/`，共享代码在 `browser-common/`。运行 `./build.sh` 后，完整的可加载目录在 `build/staging/{chrome,firefox}/`（共享代码 + IIFE bundle + 改写过 version 的 manifest）；源码树目录全程零接触。
-
-#### Chrome / Edge
-
-1. 在项目根目录运行 `./build.sh` 组装 staging
-2. 打开浏览器，进入 `chrome://extensions/`
-3. 开启右上角「开发者模式」
-4. 点击「加载已解压的扩展程序」
-5. 选择 `build/staging/chrome/` 目录
-6. 扩展图标会出现在工具栏，点击 `Alt+Q` 可快速打开弹窗
-
-> 想以 ESM 源码态（未 bundle）调试 background：自行组装目录（如 `cp -r browser-common/* chrome-src/` 后补平台 manifest/icons），源码 manifest 本就指向 ESM 源码路径，两浏览器均可直载。
-
-#### Firefox
-
-1. 在项目根目录运行 `./build.sh` 组装 staging
-2. 打开 `about:debugging#/runtime/this-firefox`
-3. 点击「临时载入附加组件」
-4. 选择 `build/staging/firefox/manifest.json`
-5. 扩展会立即加载，重启浏览器后需重新加载（临时扩展特性）
-
-### 调试 Service Worker
-
-#### Chrome
-
-1. 进入 `chrome://extensions/`
-2. 找到「AI Quota Dashboard」，点击「Service Worker」链接
-3. 会打开 DevTools，可在 Console 查看日志、在 Sources 设置断点
-
-#### Firefox
-
-1. 进入 `about:debugging#/runtime/this-firefox`
-2. 找到扩展，点击「检查」
-3. 在「控制台」和「调试器」中查看 Background Script 的运行状态
-
-**关键调试技巧**：在 `scripts/background.js` 中使用 `console.log()` 输出日志，内容会显示在 Service Worker 的 DevTools 控制台中。
-
-### background.js 职责
-
-浏览器扩展作为**统一配额数据推送端**，用自身凭证（Kimi 网页令牌 / MiMo Cookie / GLM API Key）调 API 拉取配额数据，把**配额数据**（而非凭证）推送给 VSCode，VSCode 端自动创建/更新对应的 AI 服务：
-
-**代码结构**：`scripts/background.js` 为瘦入口（仅 init 流程 + 事件监听注册 + 跨模块编排），具体职责拆分在 `scripts/lib/` 六个子模块——`config-sync.js`（监控目标/显示名称/刷新间隔）、`bridge-client.js`（端口发现/推送/重试队列/互斥锁）、`cookie-utils.js`（Cookie 读取/JWT 挑选）、`credential.js`（凭证缓存/TTL/失效探测/后台标签页刷新）、`kimi-relay.js`（Kimi access_token 被动镜像）、`relay.js`（配额数据采集 `gatherAllQuotaData()` / 推送 `relayData(force)` / 防抖）。开发态 ESM 直载，发布态经 esbuild 内联进 IIFE 单文件。
-
-```javascript
-// 推送数据示例（POST /data，需携带 X-Auth-Token 头）
-{
-  source: 'ai-quota-data-bridge',
-  timestamp: Date.now(),
-  data: [
-    { kind: 'glm', serviceData: { /* GlmServiceData：slots/history/扩展字段 */ } },
-    { kind: 'kimi', serviceData: { /* KimiServiceData */ } },
-    { kind: 'mimo', serviceData: { /* MimoServiceData */ } },
-  ],
-  activeKinds: ['glm', 'kimi', 'mimo'],
-  displayNames: { glm: '我的 GLM' },
-}
-// 注意：payload 不含任何凭证（Cookie / API Key 均不推送）
-```
-
-**核心行为**：
-
-1. **配额数据推送 + VSCode 自动创建/更新**：`relay.js` 的 `gatherAllQuotaData()` 复用 `api/{glm,kimi,mimo}.js` fetcher，用浏览器端自身凭证调 API 拉取全部配额数据，经 `relayData(force)`（保留互斥锁 / 防抖 / 重试队列）推送。VSCode 的 `handleDataPayload` 收到后自动创建/更新对应 AI 服务（`dataSource='bridge'`，无需凭证），并同步移除浏览器已删除的服务（按 `activeKinds`）。
-2. **凭证仅浏览器端自用**：`chrome.cookies.onChanged` 监听所有目标域名（`kimi.com`、`xiaomimimo.com`）的 Cookie 变化，**不再触发 Data Bridge 推送**，仅广播 `cookieChanged` 消息触发浏览器端单服务刷新。
-3. **定时凭证检测**：通过 `chrome.alarms` 按刷新间隔执行凭证检查（下限 5 分钟）：凭证存在性、过期时间和 API 探测（浏览器自身拉数依赖有效 Cookie），发现失效时通过后台非激活标签页（`loadCredentialViaBackgroundTab`）自动刷新，成功后重新推送配额数据。
-4. **端口发现**：启动时遍历 fallback 端口 `[37100..37110]`，对每个端口 `GET /health`（请求头携带打包进扩展的 `X-Bridge-Probe` 探测密钥）探测，密钥校验通过后获取 `authToken` 并维持推送通道。优先尝试上次成功的端口。
-
-> **GLM API Key 说明**：GLM 凭证不是浏览器登录态，而是用户在浏览器扩展 Popup 设置中手动填入、保存在 `chrome.storage.local` 的 API Key，仅供浏览器端拉取 GLM 配额使用，不会推送给 VSCode。
-
-### Chrome 与 Firefox 的差异
-
-| 差异点 | Chrome | Firefox |
-|--------|--------|---------|
-| **Manifest** | 标准 V3（permissions + content_scripts） | V3 + `browser_specific_settings.gecko` |
-| **扩展 ID** | 自动生成 | 需在 manifest 中显式声明 `id` |
-| **Background** | `service_worker`（`type: module`） | `scripts` 数组（`type: module`） |
-| **Cookie API** | `chrome.cookies` | `chrome.cookies`（Firefox 内置兼容） |
-| **凭证刷新** | 后台标签页（`loadCredentialViaBackgroundTab`） | 同左（两端一致） |
-| **最小版本** | Chrome 116+ | Firefox 116+ |
-| **持久性** | Service Worker 非持久 | 事件页面 |
-
-**代码兼容性**：项目中使用 `const api = typeof browser !== 'undefined' ? browser : chrome;` 做 API 兼容（如已封装）。
-
-```javascript
-// 示例：兼容的 Cookie 读取
-const api = typeof browser !== 'undefined' ? browser : chrome;
-
-api.cookies.get({ url: 'https://kimi.com', name: 'kimi-auth' })
-  .then(cookie => {
-    console.log('Cookie value:', cookie?.value);
-  });
-```
-
----
+没有遥测或开发者服务器。详细威胁模型、掩码和 stale 历史边界见 [SECURITY.md](SECURITY.md)。
 
 ## 测试
 
-### 运行单元测试
+### 运行
 
 ```bash
 cd vscode
 
-# 一次性运行所有测试
 npm test
-
-# 监听模式（开发时推荐）
 npm run test:watch
 
-# 运行特定测试文件
-npx vitest run src/core/cache.test.ts
-
-# 带覆盖率报告
-npx vitest run --coverage
+# 指定文件
+npx vitest run src/services/kimi/provider.test.ts
+npx vitest run src/storage/migrations.test.ts
 ```
 
-### 测试结构
+### 当前测试布局
 
-测试文件与源码文件**同目录**，命名规范：`{source}.test.ts`
+| 测试文件 | 覆盖重点 |
+|----------|----------|
+| `src/extension.test.ts` | 公开命令、凭证规范化、刷新/删除/详情并发、激活与异常收敛 |
+| `src/core/cache.test.ts` | 缓存 TTL、清空、LRU 访问/更新顺序与生命周期 |
+| `src/core/afk.test.ts` | 活动检测 |
+| `src/core/config.test.ts` | 配置写锁、缺失 profile、Key/endpoint 三态原子保存、Settings 唯一可信源与迁移 |
+| `src/core/fetch.test.ts` | HTTP 状态、总超时、响应体上限、2xx 非 JSON/缺 Content-Type 与安全错误 |
+| `src/core/format.test.ts` | 数字格式化 |
+| `src/core/types.test.ts` | 颜色阈值 |
+| `src/services/glm/provider.test.ts` | GLM 配额、订阅、详情、时间解析、并行编排与安全 logger |
+| `src/services/glm/detailRanges.test.ts` | 范围缓存与 detailStates 合并 |
+| `src/services/kimi/provider.test.ts` | CN/Global 共用 origin、空值与有效窗口回退、旧 usage/limits、window/detail/resetTime、新 ratio 池、可选月度、会员降级与安全日志 |
+| `src/storage/persistence.test.ts` | 损坏历史恢复与条目清洗、保存/合并、语义、保留策略、activeIds 与 noKey/staleError 过滤 |
+| `src/storage/migrations.test.ts` | v2 清理、manual 保留、幂等与失败重试 |
+| `src/ui/statusbar.test.ts` | 状态栏项生命周期、改名命令、staleError 提示与转义 |
+| `src/ui/statusBarRenderer.test.ts` | 倒计时、颜色与转义 |
+| `src/webview/compute.test.ts` | 服务可见性/骨架、设置校验、面板重渲染守卫与已删服务状态清理 |
+| `src/webview/settings.test.ts` | 未知 kind 只读/转义与正常表单 |
+| `src/webview/shared.test.ts` | 转义、fmtNum、渲染分发防御 |
 
-```
-src/
-├── core/
-│   ├── cache.ts
-│   ├── cache.test.ts          # ← 测试文件
-│   ├── format.ts
-│   ├── format.test.ts
-│   └── ...
-├── services/glm/
-│   ├── provider.ts
-│   └── provider.test.ts       # ← 测试文件
-└── ...
-```
+约定：
 
-**示例测试**：
+- 测试与源码同目录，命名 `{source}.test.ts`。
+- vitest 使用 Node 环境；`vscode` 模块 alias 到 `src/test/mocks/vscode.ts`。
+- 解析、迁移和存储修改必须补充对应 fixture/单元测试。
+- 测试 fixture 不证明服务端对所有账号返回相同字段，尤其不能据此声称 Kimi 月度配额必现。
+- 自动测试不覆盖完整 Webview DOM 交互；Extension 内详情请求去重/并发回写和复合 ARIA 也不等同于已完成屏幕阅读器或 F5 验证。真实 API、Secret Storage 实机行为和线上字段可用性不能由 fixture 推断。
 
-```typescript
-// src/core/cache.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-import { CacheManager } from './cache';
+## 添加新服务
 
-describe('CacheManager', () => {
-  let cache: CacheManager;
+1. 在 `src/services/` 参考 GLM/Kimi 创建服务包，实现 Provider、类型、设置和样式。
+2. 可选实现 `StatusBarRenderer`；需要详情时同时实现 DetailProvider 与合并函数。
+3. 在 `index.ts` 组装 descriptor，并在 `services/registry.ts` 注册。
+4. 新建 `src/webview/cards/{kind}.ts`，在 `src/webview/main.ts` 显式注册。
+5. 添加同目录 vitest 测试。
+6. 运行相关测试、lint、Extension/Webview 类型检查与 build。
 
-  beforeEach(() => {
-    cache = new CacheManager();
-  });
+完整 AI 维护约定见 [AGENTS.md](AGENTS.md)。
 
-  it('stores and retrieves data', () => {
-    const data = { id: 'test', name: 'Test', kind: 'test', slots: [], updatedAt: Date.now() };
-    cache.set('test', data, 60);
-    expect(cache.get('test')).toEqual(data);
-  });
-
-  it('returns undefined for expired entry', () => {
-    const data = { id: 'test', name: 'Test', kind: 'test', slots: [], updatedAt: Date.now() };
-    cache.set('test', data, -1); // 已过期
-    expect(cache.get('test')).toBeUndefined();
-  });
-});
-```
-
-### Mock VSCode API
-
-由于单元测试在 Node.js 环境中运行，无法直接使用 VSCode API。项目提供了统一的 Mock：
-
-```typescript
-// src/test/mocks/vscode.ts
-export const ThemeColor = class { constructor(public id: string) {} };
-export const window = {
-  createStatusBarItem: () => ({
-    text: '', color: undefined, tooltip: undefined,
-    command: undefined, show: () => {}, hide: () => {}, dispose: () => {},
-  }),
-};
-export const commands = {
-  registerCommand: () => ({ dispose: () => {} }),
-};
-// ... 更多 mock
-```
-
-在 `vitest.config.ts` 中配置路径别名，将 `vscode` 模块指向 mock：
-
-```typescript
-// vitest.config.ts
-import { defineConfig } from 'vitest/config';
-
-export default defineConfig({
-  resolve: {
-    alias: {
-      vscode: '/src/test/mocks/vscode.ts',
-    },
-  },
-});
-```
-
-**测试原则**：
-- 只测试**纯函数**（数据解析、格式化、计算逻辑）
-- 不涉及 Webview 渲染和 VSCode UI 交互
-- 使用 `describe` + `it` 组织测试用例
-- 断言使用 `expect().toEqual()` / `expect().toBe()` 等 vitest 标准 API
-
----
-
-## 构建与打包
-
-### 使用 build.sh
-
-项目根目录提供了一键打包脚本，同时打包浏览器扩展和 VSCode 扩展。采用 **staging 架构**：源码树 `chrome/`、`firefox/` 全程零接触，无清理段，构建中断不残留：
-
-```bash
-# 在项目根目录执行
-./build.sh
-
-# 输出（版本号自动取自 vscode/package.json，无需手工同步）：
-# build/
-# ├── ai-quota-dashboard-chrome-v1.1.5.zip
-# ├── ai-quota-dashboard-firefox-v1.1.5.zip
-# ├── ai-quota-dashboard-x.x.x.vsix
-# └── staging/               # 组装目录（chrome/ + firefox/，可 unpacked 调试）
-```
-
-**脚本流程**：
-
-1. `VERSION` 从 `vscode/package.json` 读取（版本号唯一可信源，消除多处手工同步）
-2. 组装 staging：`build/staging/{chrome,firefox}/` = 平台 `manifest.json` + `icons/` + rsync(`browser-common/` 全部；rsync 不可用时回退 cp)
-3. `npm --prefix vscode run build:browser`：esbuild 将 background（瘦入口 + `scripts/lib/` + `protocol/`）打包为 IIFE 单文件，覆盖 staging 内的 `scripts/background.js`
-4. 改写 **staging 副本** manifest 的 version 后从 staging 打 zip（源码树 manifest 零改动，无需备份/恢复）
-5. zip 为显式清单制：`scripts/` 只含 `background.js`（IIFE bundle）+ `kimi-content.js`，`scripts/lib/` 已内联不进包，`protocol/` 因 popup/dashboard 运行时 import 保留进包
-6. 检查 `vsce` 是否安装，如已安装则打包 VSCode 扩展（内部触发 `vscode:prepublish = clean && compile && build`）
-
-### 手动打包
-
-#### 浏览器扩展
-
-```bash
-# 推荐：直接使用 build.sh（staging 组装 + esbuild + zip 一步到位）
-./build.sh
-
-# 仅重建 background bundle（如调试打包产物）
-npm --prefix vscode run build:browser
-# 产物：build/staging/{chrome,firefox}/scripts/background.js
-```
-
-#### 创建 VSIX
+## VSIX 打包与安装
 
 ```bash
 cd vscode
 
-# esbuild 打包（vsce 也会经 vscode:prepublish 自动执行，此处手动跑便于排查）
-npm run build
+# 可选：本地没有 vsce 时安装
+npm install -g @vscode/vsce
 
-# 使用 vsce 打包
+# 自动执行 vscode:prepublish（clean + compile + typecheck:webview + build）
 vsce package
 
-# 输出：ai-quota-dashboard-x.x.x.vsix
-# 如需指定输出目录
-vsce package --no-dependencies -o ../build/
+# 或指定输出文件
+vsce package --out ai-quota-dashboard-2.0.0.vsix
 ```
 
-**本地安装 VSIX**：
-
-1. 在 VSCode 中打开「扩展」视图（Ctrl+Shift+X）
-2. 点击右上角 `...` →「从 VSIX 安装」
-3. 选择生成的 `.vsix` 文件
-
----
-
-## CI/CD 概览
-
-项目使用 **GitHub Actions** 实现自动化构建和发布。
-
-### CI 工作流（`.github/workflows/ci.yml`）
-
-**触发条件**：`push` / `pull_request` 到 `main` 分支
-
-**任务**：
-
-| Job | 说明 |
-|-----|------|
-| `vscode` | 安装依赖 → Lint → Compile（类型检查）→ Build（esbuild）→ 断言 `out/extension.js` 产物 → 测试 → vsce 打包 VSIX → 上传 Artifact |
-| `browser` | 安装依赖（esbuild）→ 校验 Manifest JSON → `bash build.sh`（staging 流程）→ `unzip -l` 断言 `scripts/background.js` 与 `protocol/index.js` 在包 → 上传 Artifact |
-
-**Artifact 保留期**：7 天
-
-### Release 工作流（`.github/workflows/release.yml`）
-
-**触发条件**：推送 `v*.*.*` 格式的 tag
-
-**流程**：
-
-1. **VSCode Job**：
-   - 从 tag 提取版本号
-   - 更新 `package.json` 版本
-   - 编译、打包 VSIX
-   - 发布到 **VSCode Marketplace**（需 `VSCE_PAT`）
-   - 发布到 **Open VSX**（需 `OPENVSX_PAT`）
-
-2. **Browser Job**：
-   - 使用 VSCode Job 产出的版本号
-   - 打包 Chrome/Firefox zip
-
-3. **GitHub Release Job**：
-   - 下载所有 Artifact
-   - 创建 GitHub Release
-   - 自动附加 VSIX 和浏览器扩展 zip
-
-**所需 Secrets**：
-
-| Secret | 用途 |
-|--------|------|
-| `VSCE_PAT` | 发布到 VSCode Marketplace |
-| `OPENVSX_PAT` | 发布到 Open VSX Registry |
-
----
-
-## 代码风格与 Lint
-
-项目使用 **ESLint** + **@typescript-eslint** 进行代码检查，配置在 `vscode/eslint.config.mjs`。
-
-**关键规则**：
-- `strict: true` — TypeScript 严格模式
-- 命名规范：PascalCase（类/接口）、camelCase（函数/变量）、UPPER_SNAKE_CASE（常量）
-- 无未使用变量（`noUnusedLocals` / `noUnusedParameters`）
-- 无隐式返回（`noImplicitReturns`）
+安装：
 
 ```bash
-cd vscode
-
-# 运行检查
-npm run lint
-
-# 自动修复（如 eslint 配置支持）
-npx eslint src --fix
+code --install-extension ai-quota-dashboard-2.0.0.vsix
 ```
 
-**提交规范**：使用 Conventional Commits
+也可在 VSCode 扩展面板选择「从 VSIX 安装」。打包后应检查 VSIX 包含 `out/extension.js`、`media/dashboard.js`、资源和清单，不包含源码、测试、node_modules 或 sourcemap。
 
-```
-feat: 添加新功能
-fix: 修复 bug
-docs: 更新文档
-refactor: 重构代码（无功能变更）
-test: 添加/修改测试
-chore: 构建/工具变更
-```
+## 发布前人工冒烟
+
+以下实机路径不能由 vitest 或 fixture 替代；联调结果应与解析测试分开记录。仅使用可撤销的测试 Key，不在日志、截图或文档中记录真实 Key。
+
+- [ ] 按 F5 激活扩展，添加并删除 GLM/Kimi 服务，确认仪表盘与状态栏同步更新。
+- [ ] 验证 Key 三态：保留掩码后保存不更换 Secret，清空后删除 Secret，输入新值后替换 Secret。
+- [ ] 未配置 Key 时显示独立 `noKey` 配置卡，而非持续加载或伪造配额。
+- [ ] 正常刷新后更新配额、刷新时间与状态栏，刷新期间保留可见旧卡片并显示加载态。
+- [ ] 无旧数据时刷新失败显示主错误卡；有旧数据时保留旧配额、详情和原时间并显示 stale 提示，重试成功后恢复正常。
+- [ ] GLM 分别加载 day/week/month 详情，检查加载态、错误重试；全局刷新后确认其他已加载范围仍保留。
+- [ ] Kimi 分别验证 CN/Global 官方 origin；会员等级不可用时配额仍正常。仅在测试账号实际返回有效月度字段时核对月度槽，未返回时确认不伪造槽位，不要求月度能力必现。
+- [ ] 全局设置输入合法值可保存；空值、非数字、越界或步长不符时显示字段错误，且不发生部分写入。
+- [ ] 检查 VSIX 内容符合上述边界，并从 VSIX 安装后完成一次激活与基本刷新。
+- [ ] 如需验证危险的重置操作，只在隔离的 Extension Development Host 中进行，不在日常工作实例执行。
+
+## CI/CD
+
+### CI：`.github/workflows/ci.yml`
+
+触发：`main` push、指向 `main` 的 pull request、`workflow_dispatch`。
+
+唯一 job `vscode` 在 Node 20 下执行：
+
+1. `npm ci`
+2. `npm run lint`
+3. `npm run compile`
+4. `npm run typecheck:webview`
+5. `npm run build` 并断言 `out/extension.js`
+6. `npm test`
+7. 非阻断的生产依赖 `npm audit`
+8. 安装 vsce，打带短 SHA 的 VSIX
+9. 上传保留 7 天的 VSIX Artifact
+
+Extension 与 Webview 类型检查均已进入 CI；`vscode:prepublish` 也会执行这两项检查，发布路径不会绕过前端类型门禁。
+
+### Release：`.github/workflows/release.yml`
+
+由 `v*.*.*` tag 触发：
+
+- `vscode` job 对齐 tag 与 package 版本并执行 compile，随后按 **lint → `typecheck:webview` → test → build → package** 顺序设置阻断门禁；任一步失败都不会生成/上传发布 VSIX。成功后上传 90 天 Artifact，并在凭证存在时发布到 VSCode Marketplace 和 Open VSX。
+- `github-release` job 只依赖 `vscode`，下载已通过上述门禁的 VSIX 并创建 GitHub Release，发布资产只有 VSIX。
+- `VSCE_PAT` 控制 Marketplace 发布，`OPENVSX_PAT` 控制 Open VSX 发布；对应 Secret 为空时跳过该发布步骤。
+
+## 代码风格
+
+- TypeScript strict mode；Extension 与 Webview 的宿主 API 不混用。
+- 注释使用中文。
+- PascalCase（类/接口）、camelCase（函数/变量）、UPPER_SNAKE_CASE（常量）。
+- 提交遵循 Conventional Commits：`feat:`、`fix:`、`docs:`、`refactor:`、`test:`、`chore:`。
 
 ---
 
-## 常见问题排查
-
-### VSCode 扩展
-
-#### 按 F5 后 Extension Host 没有加载扩展
-
-- 检查 `npm run compile` 是否成功（无 TypeScript 错误）
-- 确认已执行 `npm run build` 且 `out/extension.js`、`media/dashboard.js` 存在（esbuild 产物，`compile` 不产出）
-- 检查 `.vscode/launch.json` 的 `outFiles` 路径是否正确
-
-#### 仪表盘显示空白或样式错乱
-
-- 检查对应服务的卡片模块是否在 `src/webview/main.ts` 中显式调用了 `registerXxxCard()`（未注册 kind 会显式报错）
-- 检查 `dashboard/styles.ts` 是否引入了该服务的 CSS
-- 确认 `npm run build` 已重新产出 `media/dashboard.js`（卡片源码改动需重建 bundle）
-- 在 Webview DevTools 中查看 Console 错误（在 Extension Host 中按 `Ctrl+Shift+P` →「打开 Webview 开发者工具」）
-
-#### API 请求返回 401/403
-
-- 检查 API Key / Cookie 是否有效
-- 查看 `src/core/fetch.ts` 的请求日志
-- 确认目标 API 的域名是否在浏览器扩展的 `host_permissions` 中
-
-#### 状态栏不显示或显示 `?`
-
-- 检查该服务是否实现了 `StatusBarRenderer`
-- 检查 `statusBarRenderer` 是否正确传入 `ServiceDescriptor`
-
-### 浏览器扩展
-
-#### Service Worker 频繁终止（Chrome）
-
-Manifest V3 的 Service Worker 是非持久的，超过 5 分钟无事件会自动终止。如需持久化任务，使用 `chrome.alarms` API 定期唤醒。
-
-#### Firefox 加载扩展后重启消失
-
-Firefox 临时加载的扩展在浏览器重启后会消失，属于正常行为。如需持久安装，需通过 `about:addons` 正式安装或使用 Firefox Developer Edition 的临时加载调试功能。
-
-#### Cookie 读取返回 undefined
-
-- 确认用户已登录目标网站（如 kimi.com）
-- 检查 `host_permissions` 是否包含正确的域名
-- 在 Service Worker DevTools 中手动测试 `chrome.cookies.get()`
-
-### 测试相关
-
-#### 测试中报错 `Cannot find module 'vscode'`
-
-- 确认 `vitest.config.ts` 中配置了 `vscode` → `src/test/mocks/vscode.ts` 的 alias
-- 确认 mock 文件路径正确
-
-#### TypeScript 编译通过但测试失败
-
-- 检查测试文件是否同步了源码的最新变更
-- 使用 `npm run test:watch` 实时观察失败用例
-
-### 构建相关
-
-#### `vsce package` 报错 "Missing publisher"
-
-- 检查 `vscode/package.json` 中是否有 `publisher` 字段
-- 确认 `publisher` 与 VSCode Marketplace 的发布者 ID 一致
-- 如需本地测试，可添加 `--no-dependencies` 参数跳过部分检查：`vsce package --no-dependencies`
-
-#### `npm run compile` 报错 `Cannot find module 'vscode'`
-
-- 运行 `npm install` 安装依赖（`@types/vscode` 会提供类型定义）
-- 确保在 `vscode/` 目录下执行命令
-
-#### 浏览器扩展打包后无法安装
-
-- 检查 `manifest.json` 是否为有效的 JSON（无尾随逗号）
-- 确认 `manifest_version` 为 3
-- 确认所有 `scripts` 和 `icons` 路径指向的文件存在于 zip 中
-
----
-
-*本文档最后更新：2026-09-04*
+最后更新：2026-11-17

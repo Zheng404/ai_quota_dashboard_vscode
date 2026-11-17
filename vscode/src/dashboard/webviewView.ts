@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto';
 import { ServiceData, ServiceProfile } from '../core/types';
 import { getStyles } from './styles';
 import { getAllDescriptors } from '../services/registry';
-import type { ServiceSettingsMeta } from '../webview/types';
+import type { SaveGlobalResult, ServiceSettingsMeta } from '../webview/types';
 
 export interface SettingsData {
   profiles: ServiceProfile[];
@@ -67,8 +67,20 @@ export class DashboardWebviewViewProvider
               message.data,
             );
             return;
+          case 'saveGlobal': {
+            const result = await vscode.commands.executeCommand<SaveGlobalResult>(
+              'aiQuotaDashboard.saveGlobal',
+              message.data,
+            );
+            this.view?.webview.postMessage({
+              command: 'saveGlobalResult',
+              ok: result?.ok === true,
+              field: result?.field,
+              message: result?.message ?? (result?.ok === true ? undefined : '全局配置保存失败，请重试'),
+            });
+            return;
+          }
           case 'saveService':
-          case 'saveGlobal':
           case 'addService':
           case 'removeService':
           case 'resetData':
@@ -89,9 +101,15 @@ export class DashboardWebviewViewProvider
           }
         }
       } catch (err) {
-        vscode.window.showErrorMessage(
-          `Webview 消息处理失败: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (message.command === 'saveGlobal') {
+          this.view?.webview.postMessage({
+            command: 'saveGlobalResult',
+            ok: false,
+            message: `全局配置保存失败：${errorMessage}`,
+          });
+        }
+        vscode.window.showErrorMessage(`Webview 消息处理失败: ${errorMessage}`);
       }
     });
   }
@@ -106,7 +124,7 @@ export class DashboardWebviewViewProvider
         command: 'updateData',
         services: Array.from(this.data.values()),
         settings: this.settings,
-        refreshingIds: refreshingIds || [],
+        refreshingIds: refreshingIds ?? [],
       });
     }
   }
@@ -135,6 +153,8 @@ export class DashboardWebviewViewProvider
       keyHint: d.settings.keyHint,
       showHelpButton: d.settings.showHelpButton,
       helpCommand: d.helpCommand ?? '',
+      endpointEditable: d.settings.endpointEditable,
+      endpointPlaceholder: d.settings.endpointPlaceholder,
     }));
   }
 
@@ -153,23 +173,25 @@ export class DashboardWebviewViewProvider
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 配额仪表盘</title>
 <style>
 ${getStyles()}
 </style>
 </head>
 <body>
-<div class="container">
-	<div class="tabs">
-		<button class="tab-btn active" data-tab="dashboard">仪表盘</button>
-		<button class="tab-btn" data-tab="services">服务</button>
-		<button class="tab-btn" data-tab="global">设置</button>
+<main class="container">
+	<div class="tabs" role="tablist" aria-label="仪表盘视图" aria-orientation="horizontal">
+		<button type="button" class="tab-btn active" id="tab-dashboard" role="tab" data-tab="dashboard" aria-selected="true" aria-controls="panel-dashboard" tabindex="0">仪表盘</button>
+		<button type="button" class="tab-btn" id="tab-services" role="tab" data-tab="services" aria-selected="false" aria-controls="panel-services" tabindex="-1">服务</button>
+		<button type="button" class="tab-btn" id="tab-global" role="tab" data-tab="global" aria-selected="false" aria-controls="panel-global" tabindex="-1">设置</button>
 	</div>
-	<div class="tab-panel active" id="panel-dashboard">
-		<div class="empty-state"><p>加载中...</p></div>
+	<div class="tab-panel active" id="panel-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="0">
+		<div class="empty-state initial-loading" role="status"><span class="loading-spinner" aria-hidden="true"></span><p>正在读取配额…</p></div>
 	</div>
-	<div class="tab-panel" id="panel-services"></div>
-	<div class="tab-panel" id="panel-global"></div>
-</div>
+	<div class="tab-panel" id="panel-services" role="tabpanel" aria-labelledby="tab-services" tabindex="0" hidden></div>
+	<div class="tab-panel" id="panel-global" role="tabpanel" aria-labelledby="tab-global" tabindex="0" hidden></div>
+</main>
+<div class="sr-only" id="dashboard-announcer" role="status" aria-live="polite" aria-atomic="true"></div>
 <script nonce="${nonce}">window.__AQD_SETTINGS_META__=${settingsMeta};</script>
 <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>

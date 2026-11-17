@@ -7,15 +7,24 @@ export type { ServiceId };
 
 // ==================== 提供者接口 ====================
 
+export interface ProviderLogger {
+	log(msg: string): void;
+}
+
+/** 仅提取错误消息，避免将响应正文、凭证等附加字段写入日志 */
+export function safeErrorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : '未知错误';
+}
+
 export interface QuotaProvider {
 	kind: ServiceId;
-	fetch(apiKey: string, endpoint?: string): Promise<ServiceData>;
+	fetch(apiKey: string, endpoint?: string, logger?: ProviderLogger): Promise<ServiceData>;
 }
 
 /** 支持按需拉取详情数据的服务 */
 export interface DetailProvider {
 	/** 拉取指定时间范围的详情数据 */
-	fetchDetail(range: string, apiKey: string, endpoint?: string): Promise<unknown | undefined>;
+	fetchDetail(range: string, apiKey: string, endpoint?: string, logger?: ProviderLogger): Promise<unknown | undefined>;
 }
 
 // ==================== 服务描述符 ====================
@@ -27,6 +36,10 @@ export interface ServiceSettingsDescriptor {
 	keyHint: string;
 	/** 是否显示「如何获取？」帮助按钮 */
 	showHelpButton: boolean;
+	/** 是否允许编辑 API endpoint */
+	endpointEditable?: boolean;
+	/** API endpoint 输入框的 placeholder */
+	endpointPlaceholder?: string;
 }
 
 export interface ServiceDescriptor {

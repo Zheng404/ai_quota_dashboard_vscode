@@ -1,24 +1,20 @@
 // ==================== 服务标识 ====================
 
 /**
- * ServiceId 是字符串类型，用于标识 AI 服务种类（如 'glm'、'kimi'、'mimo'）。
+ * ServiceId 是字符串类型，用于标识 AI 服务种类（如 'glm'、'kimi'）。
  * 历史上曾尝试使用 branded type 增强编译期安全，但 VSCode 扩展中大量硬编码字符串
  * 导致维护成本过高。改为普通 string + 运行时校验（isValidServiceId）的折中方案。
  */
 export type ServiceId = string;
 
-/** 从字符串创建 ServiceId（保留供未来需要时统一替换） */
-export function createServiceId(id: string): ServiceId {
-	return id;
-}
+/** 设置页用于表示「保留现有 API Key」的掩码，绝不能写入 Secret Storage。 */
+export const API_KEY_MASK = '••••••••';
 
 export interface ServiceProfile {
 	id: string;
 	kind: ServiceId;
 	displayName: string;
 	endpoint?: string;
-	/** 数据来源: 'manual' = 手动输入, 'bridge' = Data Bridge 推送数据源 */
-	dataSource: 'manual' | 'bridge';
 }
 
 // ==================== 配额数据 ====================
@@ -50,6 +46,15 @@ export interface ServiceData {
 	history?: UsagePoint[];
 	updatedAt: number;
 	err?: string;
+	/** 尚未配置 API Key；此状态不进入缓存、历史或配额预警。 */
+	noKey?: boolean;
+	/** 保留上一次正常数据时的刷新错误；updatedAt 仍指向旧数据时间。 */
+	staleError?: string;
+}
+
+/** 是否可作为新鲜配额样本写历史或触发预警；stale 卡片虽可见但不满足。 */
+export function isFreshServiceData(data: ServiceData): boolean {
+	return data.err === undefined && data.noKey !== true && data.staleError === undefined;
 }
 
 // ==================== 命令载荷 ====================
@@ -58,8 +63,10 @@ export interface SaveServicePayload {
 	id: string;
 	name: string;
 	kind: ServiceId;
-	key: string;
-	dataSource: 'manual' | 'bridge';
+	/** undefined 保持原 Secret，空字符串清除，其余字符串替换。 */
+	key?: string;
+	/** undefined 保留原 endpoint，空字符串删除，其余字符串更新。 */
+	endpoint?: string;
 }
 
 export interface AddServicePayload {
