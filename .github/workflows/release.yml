@@ -90,7 +90,7 @@ jobs:
           VERSION="${{ steps.get_version.outputs.VERSION }}"
           awk -v ver="$VERSION" '
             index($0, "## [" ver "]") == 1 { capture=1; next }
-            capture && $0 ~ "^## \[" { exit }
+            capture && index($0, "## [") == 1 { exit }
             capture { print }
           ' CHANGELOG.md > .github-release-notes.md
 
