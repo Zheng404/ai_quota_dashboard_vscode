@@ -512,7 +512,7 @@
   function renderGlobalSettings(settings) {
     return '<section class="settings-section" aria-labelledby="global-settings-title"><h2 class="settings-title" id="global-settings-title">\u5168\u5C40\u8BBE\u7F6E</h2><p class="settings-description">\u63A7\u5236\u81EA\u52A8\u5237\u65B0\u3001\u914D\u989D\u9884\u8B66\u4E0E\u79BB\u5F00\u68C0\u6D4B\u3002</p>' + renderGlobalField("refreshInterval", "\u81EA\u52A8\u5237\u65B0\u95F4\u9694\uFF08\u79D2\uFF09", settings.refreshInterval, "0 \u8868\u793A\u7981\u7528\uFF0C\u9ED8\u8BA4 60 \u79D2\uFF1B\u53EF\u8BBE 0\uFF5E86400\uFF0C\u4EE5 60 \u79D2\u4E3A\u6B65\u957F\u3002") + renderGlobalField("warnThreshold", "\u9884\u8B66\u9608\u503C\uFF080\u20131\uFF09", settings.warnThreshold, "\u4F7F\u7528\u7387\u8FBE\u5230\u6B64\u6BD4\u4F8B\u65F6\u53D1\u9001\u9884\u8B66\uFF0C\u9ED8\u8BA4 0.8\uFF1B\u4EE5 0.05 \u4E3A\u6B65\u957F\u3002") + renderGlobalField("afkThreshold", "\u79BB\u5F00\u68C0\u6D4B\uFF08\u79D2\uFF09", settings.afkThreshold, "\u65E0\u64CD\u4F5C\u8D85\u8FC7\u6B64\u65F6\u957F\u540E\u6682\u505C\u81EA\u52A8\u5237\u65B0\uFF1B0 \u8868\u793A\u7981\u7528\uFF0C\u9ED8\u8BA4 1 \u5C0F\u65F6\uFF1B\u6700\u5927 86400 \u79D2\u3002") + '<div class="form-actions"><button type="button" class="btn btn-primary" id="save-global-btn"' + (globalSavePending ? ' disabled aria-busy="true"' : ' aria-busy="false"') + ">" + renderIcon(globalSavePending ? "loader-circle" : "save") + (globalSavePending ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58\u5168\u5C40\u914D\u7F6E") + '</button></div><div class="form-status" id="save-global-status" role="status" aria-live="polite" aria-atomic="true"></div><div class="danger-zone" aria-labelledby="reset-data-title"><h3 class="settings-title" id="reset-data-title">\u91CD\u7F6E\u6240\u6709\u6570\u636E</h3><p class="settings-description">\u5220\u9664\u5168\u90E8\u670D\u52A1\u3001API Key \u548C\u5386\u53F2\u8BB0\u5F55\u3002VSCode \u8BBE\u7F6E\u4F1A\u4FDD\u7559\uFF0C\u6B64\u64CD\u4F5C\u4E0D\u53EF\u64A4\u9500\u3002</p><button type="button" class="btn btn-danger" id="reset-data-btn" aria-expanded="false" aria-controls="reset-data-confirm">\u91CD\u7F6E\u6240\u6709\u6570\u636E</button><div class="inline-confirm" id="reset-data-confirm" data-confirm-panel role="group" aria-labelledby="reset-data-confirm-title" hidden><strong class="confirm-title" id="reset-data-confirm-title">\u786E\u5B9A\u7EE7\u7EED\u91CD\u7F6E\uFF1F</strong><p class="confirm-copy">\u91CD\u7F6E\u540E\u65E0\u6CD5\u6062\u590D\u3002\u5982\u679C\u4ECD\u9700\u8FD9\u4E9B API Key\uFF0C\u8BF7\u53D6\u6D88\u5E76\u5148\u81EA\u884C\u5907\u4EFD\u3002</p><div class="confirm-actions"><button type="button" class="btn btn-sm btn-secondary confirm-cancel">\u53D6\u6D88</button><button type="button" class="btn btn-sm btn-danger confirm-reset">\u7EE7\u7EED\u91CD\u7F6E</button></div></div></div></section>';
   }
-  function bindInlineConfirmation(container, trigger, onConfirm) {
+  function bindInlineConfirmation(container, trigger, onConfirm, onDismiss) {
     const panel = container.querySelector("[data-confirm-panel]");
     const cancel = panel?.querySelector(".confirm-cancel");
     const confirm = panel?.querySelector(".confirm-remove, .confirm-reset");
@@ -523,18 +523,25 @@
       if (open) cancel.focus();
       else if (restoreFocus) trigger.focus();
     };
+    const dismiss = () => {
+      setOpen(false, true);
+      onDismiss?.();
+    };
     trigger.addEventListener("click", () => setOpen(true));
-    cancel.addEventListener("click", () => setOpen(false, true));
-    confirm.addEventListener("click", onConfirm);
+    cancel.addEventListener("click", dismiss);
+    confirm.addEventListener("click", () => {
+      setOpen(false, true);
+      onConfirm();
+    });
     panel.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        setOpen(false, true);
+        dismiss();
       }
     });
   }
-  function bindServiceEvents() {
+  function bindServiceEvents(onDismissConfirmation) {
     document.querySelectorAll(".service-item").forEach((item) => {
       const save = item.querySelector(".save-service-btn");
       const remove = item.querySelector(".remove-service-btn");
@@ -554,7 +561,7 @@
       if (remove) {
         bindInlineConfirmation(item, remove, () => {
           vscodeApi.postMessage({ command: "removeService", data: { id: item.dataset.id ?? "", confirmed: true } });
-        });
+        }, onDismissConfirmation);
       }
     });
   }
@@ -609,7 +616,7 @@
     }
     setGlobalStatus(message, "error");
   }
-  function bindGlobalEvents() {
+  function bindGlobalEvents(onDismissConfirmation) {
     const saveBtn = document.getElementById("save-global-btn");
     if (saveBtn) {
       saveBtn.onclick = () => {
@@ -644,7 +651,7 @@
     if (resetBtn && globalPanel) {
       bindInlineConfirmation(globalPanel, resetBtn, () => {
         vscodeApi.postMessage({ command: "resetData", data: { confirmed: true } });
-      });
+      }, onDismissConfirmation);
     }
   }
 
@@ -744,6 +751,38 @@
     const target = Array.from(panel.querySelectorAll("[data-focus-key]")).find((el) => el.dataset.focusKey === focusKey);
     target?.focus({ preventScroll: true });
   }
+  function renderSettingsPanels(settings) {
+    const servicesPanel = document.getElementById("panel-services");
+    if (servicesPanel) {
+      const servicesHash = JSON.stringify({ profiles: settings.profiles, keys: settings.keys });
+      const skipRerender = shouldSkipPanelRerender(
+        isEditingInPanel(servicesPanel),
+        servicesPanel.querySelector("[data-confirm-panel]:not([hidden])") !== null
+      );
+      if (servicesHash !== servicesPanelHash && !skipRerender) {
+        servicesPanel.innerHTML = renderServiceListSettings(settings);
+        servicesPanelHash = servicesHash;
+        bindServiceEvents(reconcileSettingsPanels);
+        bindAddService();
+      }
+    }
+    const globalPanel = document.getElementById("panel-global");
+    if (globalPanel) {
+      const globalHash = JSON.stringify(settings);
+      const skipRerender = shouldSkipPanelRerender(
+        isEditingInPanel(globalPanel),
+        globalPanel.querySelector("[data-confirm-panel]:not([hidden])") !== null
+      );
+      if (globalHash !== globalPanelHash && !skipRerender) {
+        globalPanel.innerHTML = renderGlobalSettings(settings);
+        globalPanelHash = globalHash;
+        bindGlobalEvents(reconcileSettingsPanels);
+      }
+    }
+  }
+  function reconcileSettingsPanels() {
+    if (lastUpdateMessage) renderSettingsPanels(lastUpdateMessage.settings);
+  }
   function handleUpdateData(message) {
     const settings = message.settings;
     lastUpdateMessage = message;
@@ -764,33 +803,7 @@
         if (profile) announce(profile.displayName + " \u5237\u65B0\u7ED3\u675F");
       }
     }
-    const servicesPanel = document.getElementById("panel-services");
-    if (servicesPanel) {
-      const servicesHash = JSON.stringify({ profiles: settings.profiles, keys: settings.keys });
-      const skipRerender = shouldSkipPanelRerender(
-        isEditingInPanel(servicesPanel),
-        servicesPanel.querySelector("[data-confirm-panel]:not([hidden])") !== null
-      );
-      if (servicesHash !== servicesPanelHash && !skipRerender) {
-        servicesPanel.innerHTML = renderServiceListSettings(settings);
-        servicesPanelHash = servicesHash;
-        bindServiceEvents();
-        bindAddService();
-      }
-    }
-    const globalPanel = document.getElementById("panel-global");
-    if (globalPanel) {
-      const globalHash = JSON.stringify(settings);
-      const skipRerender = shouldSkipPanelRerender(
-        isEditingInPanel(globalPanel),
-        globalPanel.querySelector("[data-confirm-panel]:not([hidden])") !== null
-      );
-      if (globalHash !== globalPanelHash && !skipRerender) {
-        globalPanel.innerHTML = renderGlobalSettings(settings);
-        globalPanelHash = globalHash;
-        bindGlobalEvents();
-      }
-    }
+    renderSettingsPanels(settings);
   }
   window.addEventListener("message", (event) => {
     const message = event.data;

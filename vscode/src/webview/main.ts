@@ -122,6 +122,42 @@ function restoreDashboardFocus(panel: HTMLElement, focusKey: string | undefined)
 	target?.focus({ preventScroll: true });
 }
 
+function renderSettingsPanels(settings: UpdateDataMessage['settings']): void {
+	const servicesPanel = document.getElementById('panel-services');
+	if (servicesPanel) {
+		const servicesHash = JSON.stringify({ profiles: settings.profiles, keys: settings.keys });
+		const skipRerender = shouldSkipPanelRerender(
+			isEditingInPanel(servicesPanel),
+			servicesPanel.querySelector('[data-confirm-panel]:not([hidden])') !== null,
+		);
+		if (servicesHash !== servicesPanelHash && !skipRerender) {
+			servicesPanel.innerHTML = renderServiceListSettings(settings);
+			servicesPanelHash = servicesHash;
+			bindServiceEvents(reconcileSettingsPanels);
+			bindAddService();
+		}
+	}
+
+	const globalPanel = document.getElementById('panel-global');
+	if (globalPanel) {
+		const globalHash = JSON.stringify(settings);
+		const skipRerender = shouldSkipPanelRerender(
+			isEditingInPanel(globalPanel),
+			globalPanel.querySelector('[data-confirm-panel]:not([hidden])') !== null,
+		);
+		if (globalHash !== globalPanelHash && !skipRerender) {
+			globalPanel.innerHTML = renderGlobalSettings(settings);
+			globalPanelHash = globalHash;
+			bindGlobalEvents(reconcileSettingsPanels);
+		}
+	}
+}
+
+// 取消确认后仅协调设置面板，消费此前因编辑或确认态而跳过的最新快照。
+function reconcileSettingsPanels(): void {
+	if (lastUpdateMessage) renderSettingsPanels(lastUpdateMessage.settings);
+}
+
 function handleUpdateData(message: UpdateDataMessage): void {
 	const settings = message.settings;
 	lastUpdateMessage = message;
@@ -148,34 +184,7 @@ function handleUpdateData(message: UpdateDataMessage): void {
 		}
 	}
 
-	const servicesPanel = document.getElementById('panel-services');
-	if (servicesPanel) {
-		const servicesHash = JSON.stringify({ profiles: settings.profiles, keys: settings.keys });
-		const skipRerender = shouldSkipPanelRerender(
-			isEditingInPanel(servicesPanel),
-			servicesPanel.querySelector('[data-confirm-panel]:not([hidden])') !== null,
-		);
-		if (servicesHash !== servicesPanelHash && !skipRerender) {
-			servicesPanel.innerHTML = renderServiceListSettings(settings);
-			servicesPanelHash = servicesHash;
-			bindServiceEvents();
-			bindAddService();
-		}
-	}
-
-	const globalPanel = document.getElementById('panel-global');
-	if (globalPanel) {
-		const globalHash = JSON.stringify(settings);
-		const skipRerender = shouldSkipPanelRerender(
-			isEditingInPanel(globalPanel),
-			globalPanel.querySelector('[data-confirm-panel]:not([hidden])') !== null,
-		);
-		if (globalHash !== globalPanelHash && !skipRerender) {
-			globalPanel.innerHTML = renderGlobalSettings(settings);
-			globalPanelHash = globalHash;
-			bindGlobalEvents();
-		}
-	}
+	renderSettingsPanels(settings);
 }
 
 window.addEventListener('message', event => {

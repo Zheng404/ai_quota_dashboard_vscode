@@ -24,11 +24,14 @@ const kimiMeta: ServiceSettingsMeta = {
 };
 
 let renderServiceListSettings: typeof import('./settings').renderServiceListSettings;
+let bindServiceEvents: typeof import('./settings').bindServiceEvents;
+let postMessage: ReturnType<typeof vi.fn>;
 
 beforeAll(async () => {
-	vi.stubGlobal('acquireVsCodeApi', vi.fn(() => ({ postMessage: vi.fn() })));
+	postMessage = vi.fn();
+	vi.stubGlobal('acquireVsCodeApi', vi.fn(() => ({ postMessage })));
 	vi.stubGlobal('window', { __AQD_SETTINGS_META__: [glmMeta, kimiMeta] });
-	({ renderServiceListSettings } = await import('./settings'));
+	({ renderServiceListSettings, bindServiceEvents } = await import('./settings'));
 });
 
 afterAll(() => {
@@ -101,5 +104,103 @@ describe('renderServiceListSettings 已支持服务', () => {
 		expect(html).toContain('svc-endpoint');
 		expect(html).toContain('value="https://api.kimi.ai"');
 		expect(html).not.toContain('不支持的服务类型');
+	});
+});
+
+describe('bindServiceEvents 删除确认', () => {
+	const setupConfirmation = () => {
+		const makeButton = () => {
+			const listeners: Record<string, () => void> = {};
+			return {
+				addEventListener: vi.fn((event: string, listener: () => void) => { listeners[event] = listener; }),
+				click: () => listeners.click?.(),
+				setAttribute: vi.fn(),
+				focus: vi.fn(),
+			};
+		};
+		const remove = makeButton();
+		const cancel = makeButton();
+		const confirm = makeButton();
+		const keydownListeners: Record<string, (event: {
+			key: string;
+			preventDefault: () => void;
+			stopPropagation: () => void;
+		}) => void> = {};
+		const panel = {
+			hidden: true,
+			querySelector: vi.fn((selector: string) => selector === '.confirm-cancel' ? cancel : confirm),
+			addEventListener: vi.fn((event: string, listener: (event: {
+				key: string;
+				preventDefault: () => void;
+				stopPropagation: () => void;
+			}) => void) => { keydownListeners[event] = listener; }),
+		};
+		const item = {
+			dataset: { id: 'glm-1' },
+			querySelector: vi.fn((selector: string) => {
+				if (selector === '.remove-service-btn') return remove;
+				if (selector === '[data-confirm-panel]') return panel;
+				return null;
+			}),
+		};
+		vi.stubGlobal('document', { querySelectorAll: vi.fn(() => [item]) });
+		return {
+			remove,
+			cancel,
+			confirm,
+			panel,
+			pressKey: (key: string) => {
+				const preventDefault = vi.fn();
+				const stopPropagation = vi.fn();
+				keydownListeners.keydown?.({ key, preventDefault, stopPropagation });
+				return { preventDefault, stopPropagation };
+			},
+		};
+	};
+
+	it('确认后立即收起面板，允许后续更新重渲染服务列表', () => {
+		postMessage.mockClear();
+		const onClosed = vi.fn();
+		const { remove, confirm, panel } = setupConfirmation();
+
+		bindServiceEvents(onClosed);
+		remove.click();
+		expect(panel.hidden).toBe(false);
+		expect(onClosed).not.toHaveBeenCalled();
+		confirm.click();
+
+		expect(panel.hidden).toBe(true);
+		expect(remove.setAttribute).toHaveBeenLastCalledWith('aria-expanded', 'false');
+		expect(onClosed).not.toHaveBeenCalled();
+		expect(postMessage).toHaveBeenCalledWith({
+			command: 'removeService',
+			data: { id: 'glm-1', confirmed: true },
+		});
+	});
+
+	it('取消关闭后通知一次，以便消费被跳过的数据更新', () => {
+		const onClosed = vi.fn();
+		const { remove, cancel, panel } = setupConfirmation();
+
+		bindServiceEvents(onClosed);
+		remove.click();
+		cancel.click();
+
+		expect(panel.hidden).toBe(true);
+		expect(onClosed).toHaveBeenCalledTimes(1);
+	});
+
+	it('Escape 关闭后通知一次并阻止事件继续传播', () => {
+		const onClosed = vi.fn();
+		const { remove, panel, pressKey } = setupConfirmation();
+
+		bindServiceEvents(onClosed);
+		remove.click();
+		const { preventDefault, stopPropagation } = pressKey('Escape');
+
+		expect(panel.hidden).toBe(true);
+		expect(onClosed).toHaveBeenCalledTimes(1);
+		expect(preventDefault).toHaveBeenCalledTimes(1);
+		expect(stopPropagation).toHaveBeenCalledTimes(1);
 	});
 });

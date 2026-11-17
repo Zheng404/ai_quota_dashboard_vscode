@@ -107,7 +107,12 @@ export function renderGlobalSettings(settings: SettingsPayload): string {
 
 // ====== 设置页事件绑定 ======
 
-function bindInlineConfirmation(container: HTMLElement, trigger: HTMLButtonElement, onConfirm: () => void): void {
+function bindInlineConfirmation(
+	container: HTMLElement,
+	trigger: HTMLButtonElement,
+	onConfirm: () => void,
+	onDismiss?: () => void,
+): void {
 	const panel = container.querySelector<HTMLElement>('[data-confirm-panel]');
 	const cancel = panel?.querySelector<HTMLButtonElement>('.confirm-cancel');
 	const confirm = panel?.querySelector<HTMLButtonElement>('.confirm-remove, .confirm-reset');
@@ -119,19 +124,27 @@ function bindInlineConfirmation(container: HTMLElement, trigger: HTMLButtonEleme
 		if (open) cancel.focus();
 		else if (restoreFocus) trigger.focus();
 	};
+	const dismiss = () => {
+		setOpen(false, true);
+		onDismiss?.();
+	};
 	trigger.addEventListener('click', () => setOpen(true));
-	cancel.addEventListener('click', () => setOpen(false, true));
-	confirm.addEventListener('click', onConfirm);
+	cancel.addEventListener('click', dismiss);
+	confirm.addEventListener('click', () => {
+		// 确认后先收起面板，避免后续数据更新因确认态而跳过重渲染。
+		setOpen(false, true);
+		onConfirm();
+	});
 	panel.addEventListener('keydown', event => {
 		if (event.key === 'Escape') {
 			event.preventDefault();
 			event.stopPropagation();
-			setOpen(false, true);
+			dismiss();
 		}
 	});
 }
 
-export function bindServiceEvents(): void {
+export function bindServiceEvents(onDismissConfirmation?: () => void): void {
 	document.querySelectorAll<HTMLElement>('.service-item').forEach(item => {
 		const save = item.querySelector<HTMLButtonElement>('.save-service-btn');
 		const remove = item.querySelector<HTMLButtonElement>('.remove-service-btn');
@@ -152,7 +165,7 @@ export function bindServiceEvents(): void {
 		if (remove) {
 			bindInlineConfirmation(item, remove, () => {
 				vscodeApi.postMessage({ command: 'removeService', data: { id: item.dataset.id ?? '', confirmed: true } });
-			});
+			}, onDismissConfirmation);
 		}
 	});
 }
@@ -214,7 +227,7 @@ export function handleSaveGlobalResult(result: SaveGlobalResultMessage): void {
 	setGlobalStatus(message, 'error');
 }
 
-export function bindGlobalEvents(): void {
+export function bindGlobalEvents(onDismissConfirmation?: () => void): void {
 	const saveBtn = document.getElementById('save-global-btn');
 	if (saveBtn) {
 		saveBtn.onclick = () => {
@@ -249,6 +262,6 @@ export function bindGlobalEvents(): void {
 	if (resetBtn && globalPanel) {
 		bindInlineConfirmation(globalPanel, resetBtn, () => {
 			vscodeApi.postMessage({ command: 'resetData', data: { confirmed: true } });
-		});
+		}, onDismissConfirmation);
 	}
 }
